@@ -10,14 +10,7 @@ impl Sqrt for f32 {
     }
 }
 
-impl Sqrt for f64 {
-    fn sqrt(self) -> f64 {
-        self.sqrt()
-    }
-}
-
-pub trait Num : Copy + 
-                Sqrt +
+pub trait Num : Copy +
                 ops::Neg<Output = Self> +
                 ops::Add<Output = Self> +
                 ops::Sub<Output = Self> +
@@ -30,19 +23,22 @@ pub trait Num : Copy +
     // Just need to make sure a Complex is made with an actual number
 }
 
+pub trait Field : Num + Sqrt {}
+
+impl Field for f32 {}
 impl Num for f32 {}
-impl Num for f64 {}
 
 impl Num for Complex<f32> {}
-impl Num for Complex<f64> {}
 
 #[derive(Debug, Clone, Copy)]
+#[derive(PartialEq, Eq)]
 pub struct Complex<T: Num> {
     pub re: T,
     pub im: T,
 }
 
-impl<T: Num> ops::Neg for Complex<T> {
+// Unary Negative
+impl<T: Field> ops::Neg for Complex<T> {
     type Output = Self;
     fn neg(self) -> Self {
         Self {
@@ -52,9 +48,10 @@ impl<T: Num> ops::Neg for Complex<T> {
     }
 }
 
-impl<'a, 'b, T: Num> ops::Add<&'b Complex<T>> for &'a Complex<T> {
+// Binary, element wise addition and subtraction
+impl<T: Field> ops::Add<Complex<T>> for Complex<T> {
     type Output = Complex<T>;
-    fn add(self, other: &'b Complex<T>) -> Self::Output {
+    fn add(self, other: Complex<T>) -> Self::Output {
         Complex {
             re: self.re + other.re,
             im: self.im + other.im,
@@ -62,19 +59,9 @@ impl<'a, 'b, T: Num> ops::Add<&'b Complex<T>> for &'a Complex<T> {
     }
 }
 
-impl<'a, 'b, T: Num> ops::Add<&'b Complex<T>> for &'a Complex<T> {
+impl<T: Field> ops::Sub<Complex<T>> for Complex<T> {
     type Output = Complex<T>;
-    fn add(self, other: &'b Complex<T>) -> Self::Output {
-        Complex {
-            re: self.re + other.re,
-            im: self.im + other.im,
-        }
-    }
-}
-
-impl<'a, 'b, T: Num> ops::Sub<&'b Complex<T>> for &'a Complex<T> {
-    type Output = Complex<T>;
-    fn sub(self, other: &'b Complex<T>) -> Self::Output {
+    fn sub(self, other: Complex<T>) -> Self::Output {
         Complex {
             re: self.re - other.re,
             im: self.im - other.im,
@@ -82,29 +69,31 @@ impl<'a, 'b, T: Num> ops::Sub<&'b Complex<T>> for &'a Complex<T> {
     }
 }
 
-impl<'a, 'b, T: Num> ops::Mul<&'b T> for &'a Complex<T> {
+// Scalar multiplication and division
+impl<T: Field> ops::Mul<T> for Complex<T> {
     type Output = Complex<T>;
-    fn mul(self, other: &'b T) -> Self::Output {
+    fn mul(self, other: T) -> Self::Output {
         Complex {
-            re: self.re * *other,
-            im: self.im * *other,
+            re: self.re * other,
+            im: self.im * other,
         }
     }
 }
 
-impl<'a, 'b, T: Num> ops::Div<&'b T> for &'a Complex<T> {
+impl<T: Field> ops::Div<T> for Complex<T> {
     type Output = Complex<T>;
-    fn div(self, other: &'b T) -> Self::Output {
+    fn div(self, other: T) -> Self::Output {
         Complex {
-            re: self.re / *other,
-            im: self.im / *other,
+            re: self.re / other,
+            im: self.im / other,
         }
     }
 }
 
-impl<'a, 'b, T: Num> ops::Mul<&'b Complex<T>> for &'a Complex<T> {
+// Binary Complex multiplaction and Division
+impl<T: Field> ops::Mul<Complex<T>> for Complex<T> {
     type Output = Complex<T>;
-    fn mul(self, other: &'b Complex<T>) -> Self::Output {
+    fn mul(self, other: Complex<T>) -> Self::Output {
         Complex {
             re: self.re * other.re - self.im * other.im,
             im: self.re * other.im + self.im * other.re,
@@ -112,39 +101,40 @@ impl<'a, 'b, T: Num> ops::Mul<&'b Complex<T>> for &'a Complex<T> {
     }
 }
 
-impl<'a, 'b, T: Num> ops::Div<&'b Complex<T>> for &'a Complex<T> {
+impl<T: Field> ops::Div<Complex<T>> for Complex<T> {
     type Output = Complex<T>;
-    fn div(self, other: &'b Complex<T>) -> Self::Output {
-        let temp = other.inverse();
-        self * &temp
+    fn div(self, other: Complex<T>) -> Self::Output {
+        self * other.inverse()
     }
 }
 
-impl<'a, 'b, T: Num> ops::AddAssign<&'b Complex<T>> for &'a mut Complex<T> {
-    fn add_assign(&mut self, other: &'b Complex<T>) {
+// Assignment Operations
+impl<T: Field> ops::AddAssign<Complex<T>> for Complex<T> {
+    fn add_assign(&mut self, other: Complex<T>) {
         *self = *self + other;
     }
 }
 
-impl<'a, 'b, T: Num> ops::SubAssign<&'b Complex<T>> for &'a mut Complex<T> {
-    fn sub_assign(&mut self, other: &'b Complex<T>) {
+impl<T: Field> ops::SubAssign<Complex<T>> for Complex<T> {
+    fn sub_assign(&mut self, other: Complex<T>) {
         *self = *self - other;
     }
 }
 
-impl<'a, 'b, T: Num> ops::MulAssign<&'b T> for &'a mut Complex<T> {
-    fn mul_assign(&mut self, other: &'b T) {
+impl<T: Field> ops::MulAssign<Complex<T>> for Complex<T> {
+    fn mul_assign(&mut self, other: Complex<T>) {
         *self = *self * other;
     }
 }
 
-impl<'a, 'b, T: Num> ops::DivAssign<&'b T> for &'a mut Complex<T> {
-    fn div_assign(&mut self, other: &'b T) {
+impl<T: Field> ops::DivAssign<Complex<T>> for Complex<T> {
+    fn div_assign(&mut self, other: Complex<T>) {
         *self = *self / other;
     }
 }
 
-impl<T: Num> Complex<T> {
+// Method specifcs for Complex<T>
+impl<T: Field> Complex<T> {
     pub fn new(re: T, im: T) -> Self {
         Self { re, im }
     }
@@ -161,12 +151,81 @@ impl<T: Num> Complex<T> {
         self.magnitude_squared().sqrt()
     }
 
-    pub fn inverse(&self) -> Self {
-        let denominator = self.magnitude_squared();
-        Self {
-            re: self.re / denominator,
-            im: -self.im / denominator,
-        }
+    pub fn inverse(&self) -> Complex<T> {
+        self.conjugate() / self.magnitude_squared()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complex_scalar_mult() {
+        let a = Complex::<f32>::new(1.0, 2.0);
+        assert_eq!(a * 2.0, Complex::<f32>::new(2.0, 4.0));
+    }
+
+    #[test]
+    fn complex_scalar_div() {
+        let a = Complex::<f32>::new(1.0, 2.0);
+        assert_eq!(a / 2.0, Complex::<f32>::new(0.5, 1.0));
+    }
+
+    #[test]
+    fn complex_negate() {
+        let a = Complex::<f32>::new(1.0, 2.0);
+        assert_eq!(-a, Complex::<f32>::new(-1.0, -2.0));
+    }
+
+    #[test]
+    fn complex_conjugate() {
+        let a = Complex::<f32>::new(1.0, 2.0);
+        assert_eq!(a.conjugate(), Complex::<f32>::new(1.0, -2.0));
+    }
+
+    #[test]
+    fn complex_inverse() {
+        let a = Complex::<f32>::new(1.0, 2.0);
+        assert_eq!(a.inverse(), Complex::<f32>::new(0.2, -0.4));
+    }
+
+    #[test]
+    fn complex_magnitude() {
+        let a = Complex::<f32>::new(3.0, 4.0);
+        let b = Complex::<f32>::new(-4.0, 3.0);
+        assert_eq!(a.magnitude_squared(), 25.0);
+        assert_eq!(b.magnitude_squared(), 25.0);
+        assert_eq!(a.magnitude(), 5.0);
+        assert_eq!(b.magnitude(), 5.0);
+    }
+
+    #[test]
+    fn complex_add() {
+        let a = Complex::<f32>::new(1.0, 2.0);
+        let b = Complex::<f32>::new(3.0, 4.0);
+        assert_eq!(a + b, Complex::<f32>::new(4.0, 6.0));
+    }
+
+    #[test]
+    fn complex_sub() {
+        let a = Complex::<f32>::new(1.0, 2.0);
+        let b = Complex::<f32>::new(3.0, 4.0);
+        assert_eq!(a - b, Complex::<f32>::new(-2.0, -2.0));
+    }
+
+    #[test]
+    fn complex_mult() {
+        let a = Complex::<f32>::new(1.0, 2.0);
+        let b = Complex::<f32>::new(3.0, 4.0);
+        assert_eq!(a * b, Complex::<f32>::new(-5.0, 10.0));
+    }
+
+    #[test]
+    fn complex_div() {
+        let a = Complex::<f32>::new(20.0, -4.0);
+        let b = Complex::<f32>::new(3.0, 2.0);
+        assert_eq!(a / b, Complex::<f32>::new(4.0, -4.0));
     }
 }
 

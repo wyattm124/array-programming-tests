@@ -1,5 +1,6 @@
 mod complex;
 mod accumulate;
+mod view;
 
 fn main() {
     let c1 = complex::Complex::<f32>::new(1.0, 2.0);

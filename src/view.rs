@@ -4,54 +4,63 @@ use std::ops;
 // NOTE : indexer should be a FAST, simple, indexing function. 95% of the time it should be
 //  a linear transformation.
 
-trait Indexer: Fn(usize) -> usize + Copy + Clone {}
+pub trait Indexer: Fn(usize) -> usize + Copy + Clone {}
 impl<F: Fn(usize) -> usize + Copy + Clone> Indexer for F {}
 
 #[derive(Debug, Clone, Copy)]
-pub struct View<'a, T, F: Indexer> {
-    data: &'a [T],
+pub struct View<'a, T, F: Indexer, const N: usize> {
+    data: &'a [T; N],
     indexer: F,
-    domain: usize,
 }
 
 #[derive(Debug)]
-pub struct ViewMut<'a, T, F: Indexer> {
-    data: &'a mut [T],
+pub struct ViewMut<'a, T, F: Indexer, const N: usize> {
+    data: &'a mut [T; N],
     indexer: F,
-    domain: usize,
 }
 
-impl<'a, T, F: Indexer> View<'a, T, F> {
-    pub fn new(data: &'a [T], indexer: F, domain: usize) -> Self {
-        Self { data, indexer, domain }
+impl<'a, T, F: Indexer, const N: usize> View<'a, T, F, N> {
+    pub fn new(data: &'a [T; N], indexer: F) -> Self {
+        Self { data, indexer }
     }
 }
 
-impl<'a, T, F: Indexer> ViewMut<'a, T, F> {
-    pub fn new(data: &'a mut [T], indexer: F, domain: usize) -> Self {
-        Self { data, indexer, domain }
-    }
-
-    pub fn as_view(&self) -> View<'_, T, F> {
-        View::new(self.data, self.indexer.clone(), self.domain)
+impl<'a, T, const N: usize> View<'a, T, fn(usize) -> usize, N> {
+    pub fn ident_new(data: &'a [T; N]) -> Self {
+        Self { data, indexer: |i| i }
     }
 }
 
-impl<'a, T, F: Indexer> ops::Index<usize> for View<'a, T, F> {
+impl<'a, T, F: Indexer, const N: usize> ViewMut<'a, T, F, N> {
+    pub fn new(data: &'a mut [T; N], indexer: F) -> Self {
+        Self { data, indexer }
+    }
+    pub fn as_view(&self) -> View<'_, T, F, N> {
+        View::new(self.data, self.indexer.clone())
+    }
+}
+
+impl<'a, T, const N: usize> ViewMut<'a, T, fn(usize) -> usize, N> {
+    pub fn ident_new(data: &'a mut [T; N]) -> Self {
+        Self{data, indexer: |i| i}
+    }
+}
+
+impl<'a, T, F: Indexer, const N: usize> ops::Index<usize> for View<'a, T, F, N> {
     type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
         &self.data[(self.indexer)(index)]
     }
 }
 
-impl<'a, T, F: Indexer> ops::Index<usize> for ViewMut<'a, T, F> {
+impl<'a, T, F: Indexer, const N: usize> ops::Index<usize> for ViewMut<'a, T, F, N> {
     type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
         &self.data[(self.indexer)(index)]
     }
 }
 
-impl<'a, T, F: Indexer> ops::IndexMut<usize> for ViewMut<'a, T, F> {
+impl<'a, T, F: Indexer, const N: usize> ops::IndexMut<usize> for ViewMut<'a, T, F, N> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.data[(self.indexer)(index)]
     }
@@ -63,8 +72,8 @@ mod tests {
 
     #[test]
     fn identity_view() {
-        let data = vec![0, 1, 2, 3, 4];
-        let view = View::new(&data, |i| i, data.len());
+        let data = [0, 1, 2, 3, 4];
+        let view = View::<_, _, 5>::ident_new(&data);
         assert_eq!(view[0], 0);
         assert_eq!(view[1], 1);
         assert_eq!(view[2], 2);
@@ -74,15 +83,15 @@ mod tests {
 
     #[test]
     fn permuted_view() {
-        let data = vec![0, 1, 2, 3, 4];
-        let view = View::new(&data, |i| (4 - i), data.len());
+        let data = [0, 1, 2, 3, 4];
+        let view = View::<_, _, 5>::new(&data, |i| (4 - i));
         assert_eq!(view[0], 4);
         assert_eq!(view[1], 3);
         assert_eq!(view[2], 2);
         assert_eq!(view[3], 1);
         assert_eq!(view[4], 0);
 
-        let view = View::new(&data, |i| (2 * i) % 5, data.len());
+        let view = View::<_, _, 5>::new(&data, |i| (2 * i) % 5);
         assert_eq!(view[0], 0);
         assert_eq!(view[1], 2);
         assert_eq!(view[2], 4);
@@ -92,9 +101,8 @@ mod tests {
 
     #[test]
     fn identity_view_mut() {
-        let mut data = vec![0, 1, 2, 3, 4];
-        let len = data.len();
-        let mut view = ViewMut::new(&mut data, |i| i, len);
+        let mut data = [0, 1, 2, 3, 4];
+        let mut view = ViewMut::<_, _, 5>::ident_new(&mut data);
         view[3] += 10;
         assert_eq!(view[0], 0);
         assert_eq!(view[1], 1);
@@ -105,9 +113,8 @@ mod tests {
 
     #[test]
     fn permuted_view_mut() {
-        let mut data = vec![0, 1, 2, 3, 4];
-        let len = data.len();
-        let mut view = ViewMut::new(&mut data, |i| (len - 1) - i, len);
+        let mut data = [0, 1, 2, 3, 4];
+        let mut view = ViewMut::<_, _, 5>::new(&mut data, |i| (4 - i));
         view[0] = 10;
         assert_eq!(view[0], 10);
         assert_eq!(view[1], 3);
@@ -115,7 +122,7 @@ mod tests {
         assert_eq!(view[3], 1);
         assert_eq!(view[4], 0);
 
-        let mut view = ViewMut::new(&mut data, |i| (2 * i) % len, len);
+        let mut view = ViewMut::<_, _, 5>::new(&mut data, |i| (2 * i) % 5);
         view[3] *= 7;
         assert_eq!(view[0], 0);
         assert_eq!(view[1], 2);

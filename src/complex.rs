@@ -1,15 +1,5 @@
 use std::ops;
 
-pub trait Sqrt {
-    fn sqrt(self) -> Self;
-}
-
-impl Sqrt for f32 {
-    fn sqrt(self) -> f32 {
-        self.sqrt()
-    }
-}
-
 pub trait Num : Copy +
                 ops::Neg<Output = Self> +
                 ops::Add<Output = Self> +
@@ -23,11 +13,8 @@ pub trait Num : Copy +
     // Just need to make sure a Complex is made with an actual number
 }
 
-pub trait Field : Num + Sqrt {}
-
-impl Field for f32 {}
 impl Num for f32 {}
-
+impl Num for i32 {}
 impl Num for Complex<f32> {}
 
 #[derive(Debug, Clone, Copy)]
@@ -38,7 +25,7 @@ pub struct Complex<T: Num> {
 }
 
 // Unary Negative
-impl<T: Field> ops::Neg for Complex<T> {
+impl<T: Num> ops::Neg for Complex<T> {
     type Output = Self;
     fn neg(self) -> Self {
         Self {
@@ -49,7 +36,7 @@ impl<T: Field> ops::Neg for Complex<T> {
 }
 
 // Binary, element wise addition and subtraction
-impl<T: Field> ops::Add<Complex<T>> for Complex<T> {
+impl<T: Num> ops::Add<Complex<T>> for Complex<T> {
     type Output = Complex<T>;
     fn add(self, other: Complex<T>) -> Self::Output {
         Complex {
@@ -59,7 +46,7 @@ impl<T: Field> ops::Add<Complex<T>> for Complex<T> {
     }
 }
 
-impl<T: Field> ops::Sub<Complex<T>> for Complex<T> {
+impl<T: Num> ops::Sub<Complex<T>> for Complex<T> {
     type Output = Complex<T>;
     fn sub(self, other: Complex<T>) -> Self::Output {
         Complex {
@@ -70,7 +57,7 @@ impl<T: Field> ops::Sub<Complex<T>> for Complex<T> {
 }
 
 // Scalar multiplication and division
-impl<T: Field> ops::Mul<T> for Complex<T> {
+impl<T: Num> ops::Mul<T> for Complex<T> {
     type Output = Complex<T>;
     fn mul(self, other: T) -> Self::Output {
         Complex {
@@ -80,7 +67,7 @@ impl<T: Field> ops::Mul<T> for Complex<T> {
     }
 }
 
-impl<T: Field> ops::Div<T> for Complex<T> {
+impl<T: Num> ops::Div<T> for Complex<T> {
     type Output = Complex<T>;
     fn div(self, other: T) -> Self::Output {
         Complex {
@@ -91,7 +78,7 @@ impl<T: Field> ops::Div<T> for Complex<T> {
 }
 
 // Binary Complex multiplaction and Division
-impl<T: Field> ops::Mul<Complex<T>> for Complex<T> {
+impl<T: Num> ops::Mul<Complex<T>> for Complex<T> {
     type Output = Complex<T>;
     fn mul(self, other: Complex<T>) -> Self::Output {
         Complex {
@@ -101,7 +88,7 @@ impl<T: Field> ops::Mul<Complex<T>> for Complex<T> {
     }
 }
 
-impl<T: Field> ops::Div<Complex<T>> for Complex<T> {
+impl<T: Num> ops::Div<Complex<T>> for Complex<T> {
     type Output = Complex<T>;
     fn div(self, other: Complex<T>) -> Self::Output {
         self * other.inverse()
@@ -109,32 +96,32 @@ impl<T: Field> ops::Div<Complex<T>> for Complex<T> {
 }
 
 // Assignment Operations
-impl<T: Field> ops::AddAssign<Complex<T>> for Complex<T> {
+impl<T: Num> ops::AddAssign<Complex<T>> for Complex<T> {
     fn add_assign(&mut self, other: Complex<T>) {
         *self = *self + other;
     }
 }
 
-impl<T: Field> ops::SubAssign<Complex<T>> for Complex<T> {
+impl<T: Num> ops::SubAssign<Complex<T>> for Complex<T> {
     fn sub_assign(&mut self, other: Complex<T>) {
         *self = *self - other;
     }
 }
 
-impl<T: Field> ops::MulAssign<Complex<T>> for Complex<T> {
+impl<T: Num> ops::MulAssign<Complex<T>> for Complex<T> {
     fn mul_assign(&mut self, other: Complex<T>) {
         *self = *self * other;
     }
 }
 
-impl<T: Field> ops::DivAssign<Complex<T>> for Complex<T> {
+impl<T: Num> ops::DivAssign<Complex<T>> for Complex<T> {
     fn div_assign(&mut self, other: Complex<T>) {
         *self = *self / other;
     }
 }
 
 // Method specifcs for Complex<T>
-impl<T: Field> Complex<T> {
+impl<T: Num> Complex<T> {
     pub fn new(re: T, im: T) -> Self {
         Self { re, im }
     }
@@ -145,10 +132,6 @@ impl<T: Field> Complex<T> {
 
     pub fn magnitude_squared(&self) -> T {
         self.re * self.re + self.im * self.im
-    }
-
-    pub fn magnitude(&self) -> T {
-        self.magnitude_squared().sqrt()
     }
 
     pub fn inverse(&self) -> Complex<T> {
@@ -196,8 +179,6 @@ mod tests {
         let b = Complex::<f32>::new(-4.0, 3.0);
         assert_eq!(a.magnitude_squared(), 25.0);
         assert_eq!(b.magnitude_squared(), 25.0);
-        assert_eq!(a.magnitude(), 5.0);
-        assert_eq!(b.magnitude(), 5.0);
     }
 
     #[test]

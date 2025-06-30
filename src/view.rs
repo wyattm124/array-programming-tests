@@ -9,30 +9,33 @@ impl<F: Fn(usize) -> usize + Copy + Clone> Indexer for F {}
 
 #[derive(Debug, Clone, Copy)]
 pub struct View<'a, T, F: Indexer, const N: usize> {
-    data: &'a [T; N],
+    data: &'a [T],
     indexer: F,
 }
 
 #[derive(Debug)]
 pub struct ViewMut<'a, T, F: Indexer, const N: usize> {
-    data: &'a mut [T; N],
+    data: &'a mut [T],
     indexer: F,
 }
 
 impl<'a, T, F: Indexer, const N: usize> View<'a, T, F, N> {
-    pub fn new(data: &'a [T; N], indexer: F) -> Self {
+    pub fn new(data: &'a [T], indexer: F) -> Self {
         Self { data, indexer }
+    }
+    pub fn subview<const M: usize>(&self, start: usize) -> View<'_, T, F, M> {
+        View::new(&self.data[start..start + M], self.indexer.clone())
     }
 }
 
 impl<'a, T, const N: usize> View<'a, T, fn(usize) -> usize, N> {
-    pub fn ident_new(data: &'a [T; N]) -> Self {
+    pub fn ident_new(data: &'a [T]) -> Self {
         Self { data, indexer: |i| i }
     }
 }
 
 impl<'a, T, F: Indexer, const N: usize> ViewMut<'a, T, F, N> {
-    pub fn new(data: &'a mut [T; N], indexer: F) -> Self {
+    pub fn new(data: &'a mut [T], indexer: F) -> Self {
         Self { data, indexer }
     }
     pub fn as_view(&self) -> View<'_, T, F, N> {
@@ -41,7 +44,7 @@ impl<'a, T, F: Indexer, const N: usize> ViewMut<'a, T, F, N> {
 }
 
 impl<'a, T, const N: usize> ViewMut<'a, T, fn(usize) -> usize, N> {
-    pub fn ident_new(data: &'a mut [T; N]) -> Self {
+    pub fn ident_new(data: &'a mut [T]) -> Self {
         Self{data, indexer: |i| i}
     }
 }

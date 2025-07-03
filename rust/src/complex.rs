@@ -1,4 +1,5 @@
 use std::ops;
+use bincode::{Decode, Encode};
 
 pub trait Num : Copy +
                 ops::Neg<Output = Self> +
@@ -19,6 +20,7 @@ impl Num for Complex<f32> {}
 
 #[derive(Debug, Clone, Copy)]
 #[derive(PartialEq, Eq)]
+#[derive(Decode, Encode)]
 pub struct Complex<T: Num> {
     pub re: T,
     pub im: T,

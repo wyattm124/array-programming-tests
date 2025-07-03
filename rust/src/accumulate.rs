@@ -1,7 +1,6 @@
 use crate::view::View;
 use crate::view::ViewMut;
 use crate::view::Indexer;
-use crate::complex::Complex;
 use crate::complex::Num;
 
 // Many Key components of efficient numerical algorithms come down to
@@ -27,6 +26,21 @@ fn correlate<'a, T: Num, F: Indexer, const M: usize, const N: usize, const O: us
 
     for i in 0..O {
         mac(a.subview::<N>(i), b, &mut c[i]);
+    }
+}
+
+fn resample<'a, T: Num, F: Indexer, const M: usize, const N: usize, const O: usize>(
+    a: View<'a, T, F, M>,
+    b: View<'a, T, F, N>,
+    c: &mut ViewMut<'a, T, F, O>,
+    interp: usize,
+    decim: usize,
+) -> () {
+    // Should have similar constraints to correlate, about accounting for interp
+    //  and decim
+    let a_p = a.compose(|i| i / interp);
+    for i in (0..(M*interp)).step_by(decim) {
+        mac(a_p.subview::<N>(i), b, &mut c[i]);
     }
 }
 

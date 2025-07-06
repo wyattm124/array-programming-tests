@@ -146,7 +146,8 @@ namespace FFT {
         return;
     }
 
-    // TODO : how can we do an FFT length that is shorter than the inpur array length?
+    // TODO : may want to shift the result so that DC component is at the center,
+    //  but without this shift the FFT and IFFT are inverses of each other
     template <std::size_t N>
     constexpr void fft(std::complex<float> *data) {
         fft_recurse<N>(data);
@@ -155,7 +156,23 @@ namespace FFT {
         for (std::size_t i = 0; i < N; i++)
             data[i] /= static_cast<float>(N);
 
-        // TODO : shift fft result so that DC component is at the center
+        return;
+    }
+
+    template <std::size_t N>
+    // Inverse FFT is just FFT on conj of input, and then conj of output
+    constexpr void ifft(std::complex<float> *data) {
+        for (std::size_t i = 0; i < N; i++)
+            data[i] = std::conj(data[i]);
+
+        fft_recurse<N>(data);
+
+        for (std::size_t i = 0; i < N; i++)
+            data[i] = std::conj(data[i]);
+
+        // NOTE : if the fft is normalized, the ifft does not need to be normalized
+        //  to keep the ifft the exact inverse operation of the fft.
+
         return;
     }
 

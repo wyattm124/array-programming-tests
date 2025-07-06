@@ -74,19 +74,25 @@
  TEST_CASE("FFT") {
     // Test Inputs
     std::array<std::complex<float>, 8> data1 = {0};
-    FFT::wave_gen(data1.data(), 8, 1, 0, 1);
-    FFT::wave_gen(data1.data(), 8, 2, 0, 1);
+    FFT::wave_gen(data1.data(), 8, 1, 1, 1);
+    FFT::wave_gen(data1.data(), 8, 2, 2, 1);
+    std::array<std::complex<float>, 8> data1_copy;
+    for (std::size_t i = 0; i < 8; i++)
+        data1_copy[i] = data1[i];
 
     std::array<std::complex<float>, 9> data2 = {0};
-    FFT::wave_gen(data2.data(), 9, 1, 0, 1);
-    FFT::wave_gen(data2.data(), 9, 3, 0, 1);
-
-    // TODO : Test Answers
+    FFT::wave_gen(data2.data(), 9, 1, 3, 1);
+    FFT::wave_gen(data2.data(), 9, 3, 4, 1);
+    std::array<std::complex<float>, 9> data2_copy;
+    for (std::size_t i = 0; i < 9; i++)
+        data2_copy[i] = data2[i]; 
 
     // modify in place
     FFT::fft<8>(data1.data());
     FFT::fft<9>(data2.data());
     
+    // TODO : Test Answers
+
     // Check Outputs
     std::cout << "Case 1" << std::endl;
     for (std::size_t i = 0; i < 8; i++) {
@@ -97,6 +103,23 @@
     std::cout << "Case 2" << std::endl;
     for (std::size_t i = 0; i < 9; i++) {
         std::cout << data2[i] << ", ";
+    }
+    std::cout << std::endl;
+
+    // modify in place
+    FFT::ifft<8>(data1.data());
+    FFT::ifft<9>(data2.data());
+    
+    // Check Outputs
+    std::cout << "Case 3" << std::endl;
+    for (std::size_t i = 0; i < 8; i++) {
+        std::cout << std::abs(data1[i] - data1_copy[i]) << ", ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "Case 4" << std::endl;
+    for (std::size_t i = 0; i < 9; i++) {
+        std::cout << std::abs(data2[i] - data2_copy[i]) << ", ";
     }
     std::cout << std::endl;
  }

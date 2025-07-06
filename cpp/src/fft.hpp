@@ -1,0 +1,147 @@
+#include <array>
+#include <complex>
+#include <cstddef>
+#include <cmath>
+
+namespace FFT {
+    constexpr double Neg2PI = -2.0 * M_PI;
+
+    // Just get the first smallest prime factor of N
+    //  NOTE : this is key step in the induction for the mixed-radix-Cooley-Tukey FFT algorithm
+    constexpr std::size_t get_prime_factor(std::size_t N) {
+        for (std::size_t i = 2; i * i <= N; i++) {
+            if (N % i == 0) {
+                return i;
+            }
+        }
+        return N;
+    }
+
+    // This is only for testing the get_prime_factor function
+    constexpr std::array<std::size_t, 64> prime_factorization(std::size_t n) {
+        // Take care of "degenerate" edge cases
+        std::array<std::size_t, 64> factors = {0};
+        if (n == 0) {
+            return factors;
+        } else if (n == 1) {
+            factors[0] = 1;
+            return factors;
+        }
+
+        // For all other cases, do the usual loop
+        std::size_t factor_count = 0;
+        std::size_t p = get_prime_factor(n);
+        while (p > 1) {
+            while (n % p == 0) {
+                factors[factor_count++] = p;
+                n /= p;
+            }
+            p = get_prime_factor(n);
+        }
+        return factors;
+    }
+
+    // For a prime p of N, transpose the array so indexes of the same mod p are in order
+    //  in the same "bin"
+    //  NOTE : this is key step in the induction for the in-place mixed-radix-Cooley-Tukey FFT algorithm
+    template <std::size_t N, typename T>
+    constexpr void prime_factor_binner(T *data) {
+        // Get first prime factor
+        constexpr auto p = get_prime_factor(N);
+
+        // Base case
+        if constexpr (p < 2) {
+            return;
+        }
+
+        // Have an array to track which elements have already been placed
+        std::array<bool, N> flip_tracker = {false};
+
+        // Given an index n, return the index it should be moved to
+        constexpr auto get_next_index = [=](std::size_t n) -> std::size_t {
+            const auto M = N / p;
+            const auto i = n % p;
+            const auto j = n / p;
+            return i * M + j;
+        };
+
+        // Because of basic group theory, if N / p is not prime, we will
+        //  have at least one loop of transposition that does not span all items.
+        //  so as we whack-a-mole replace elements, we may need to find a new
+        //  loop of elements to start replacing.
+        std::size_t earliest_unmoved_index = 0;
+        std::size_t curr_index = 0;
+        std::size_t next_index = get_next_index(curr_index);
+        T temp_val = data[curr_index];
+        while (earliest_unmoved_index < N) {
+            // Complete one loop of transpositions
+            while (!flip_tracker[next_index]) {
+                flip_tracker[next_index] = true;
+                if (curr_index != next_index) { // avoid swap with self
+                    std::swap(temp_val, data[next_index]);
+                    curr_index = next_index;
+                    next_index = get_next_index(curr_index);
+                }
+            }
+
+            // Update earliest unmoved index if necessary
+            while (earliest_unmoved_index < N && flip_tracker[earliest_unmoved_index])
+                earliest_unmoved_index++;
+
+            // Update bookkeeping for next loop of transpositions
+            curr_index = earliest_unmoved_index;
+            next_index = get_next_index(curr_index);
+            temp_val = data[curr_index];
+        }
+        return;
+    }
+
+    // In-place Mixed Radix Cooley Tukey FFT
+    template <std::size_t N>
+    constexpr void fft(std::complex<float> *data) {
+        // Get first prime factor
+        constexpr auto p = get_prime_factor(N);
+        constexpr auto M = N / p;
+
+        // Base case
+        if constexpr (p < 2) {
+            return;
+        }
+
+        // Transpose Input Data around the radix
+        prime_factor_binner<N>(data);
+
+        // Recursively apply fft to each bin
+        for (std::size_t i = 0; i < p; i++)
+            fft<M>(data + (i * M));
+
+        // Combine recursive results
+        std::array<std::complex<float>, p> temp_factors;
+        std::array<std::complex<float>, p> temp_results;
+        constexpr auto get_factor = [](std::size_t i, std::size_t j, std::size_t k) -> std::complex<float> {
+            const float angle = static_cast<float>(Neg2PI * static_cast<double>(i * (k + j * M)) / static_cast<double>(N));
+            return {std::cosf(angle), std::sinf(angle)};
+        };
+            
+        for (std::size_t i = 0; i < M; i++) {
+            // Store what strided values are
+            for (std::size_t j = 0; j < p; j++)
+                temp_factors[j] = data[i + (j * M)];
+
+            // Recursively calculate strided results in temp location
+            for (std::size_t j = 0; j < p; j++) {
+                temp_results[j] = {0, 0};
+                for (std::size_t k = 0; k < p; k++) {
+                    temp_results[j] += temp_factors[k] * get_factor(k, j, i);
+                }
+            }
+            
+            // Finally write in strided results
+            for (std::size_t j = 0; j < p; j++)
+                data[i + (j * M)] = temp_results[j];
+        }
+
+        // This function is in-place! the input is modified with the result.
+        return;
+    }
+}

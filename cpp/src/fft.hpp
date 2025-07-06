@@ -99,7 +99,7 @@ namespace FFT {
 
     // In-place Mixed Radix Cooley Tukey FFT
     template <std::size_t N>
-    constexpr void fft(std::complex<float> *data) {
+    constexpr void fft_recurse(std::complex<float> *data) {
         // Get first prime factor
         constexpr auto p = get_prime_factor(N);
         constexpr auto M = N / p;
@@ -114,7 +114,7 @@ namespace FFT {
 
         // Recursively apply fft to each bin
         for (std::size_t i = 0; i < p; i++)
-            fft<M>(data + (i * M));
+            fft_recurse<M>(data + (i * M));
 
         // Combine recursive results
         std::array<std::complex<float>, p> temp_factors;
@@ -143,6 +143,19 @@ namespace FFT {
         }
 
         // This function is in-place! the input is modified with the result.
+        return;
+    }
+
+    // TODO : how can we do an FFT length that is shorter than the inpur array length?
+    template <std::size_t N>
+    constexpr void fft(std::complex<float> *data) {
+        fft_recurse<N>(data);
+
+        // Normalize
+        for (std::size_t i = 0; i < N; i++)
+            data[i] /= static_cast<float>(N);
+
+        // TODO : shift fft result so that DC component is at the center
         return;
     }
 

@@ -49,7 +49,7 @@
      CHECK(FFT::prime_factorization(13 * 17 * 19) == std::array<size_t, 64>{13, 17, 19});
  }
 
- TEST_CASE("FFT") {
+ TEST_CASE("FFT Radix Transposition") {
     // Test Inputs
     std::array<std::complex<float>, 8> data1 = {{0, 1, 2, 3, 4, 5, 6, 7}};
     std::array<std::complex<float>, 9> data2 = {{0, 1, 2, 3, 4, 5, 6, 7, 8}};
@@ -69,4 +69,34 @@
     for (std::size_t i = 0; i < 9; i++) {
         CHECK(data2[i] == answer2[i]);
     }
+ }
+
+ TEST_CASE("FFT") {
+    // Test Inputs
+    std::array<std::complex<float>, 8> data1 = {0};
+    FFT::wave_gen(data1.data(), 8, 1, 0, 1);
+    FFT::wave_gen(data1.data(), 8, 2, 0, 1);
+
+    std::array<std::complex<float>, 9> data2 = {0};
+    FFT::wave_gen(data2.data(), 9, 1, 0, 1);
+    FFT::wave_gen(data2.data(), 9, 3, 0, 1);
+
+    // TODO : Test Answers
+
+    // modify in place
+    FFT::fft<8>(data1.data());
+    FFT::fft<9>(data2.data());
+    
+    // Check Outputs
+    std::cout << "Case 1" << std::endl;
+    for (std::size_t i = 0; i < 8; i++) {
+        std::cout << data1[i] << ", ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "Case 2" << std::endl;
+    for (std::size_t i = 0; i < 9; i++) {
+        std::cout << data2[i] << ", ";
+    }
+    std::cout << std::endl;
  }

@@ -4,7 +4,8 @@
 #include <cmath>
 
 namespace FFT {
-    constexpr double Neg2PI = -2.0 * M_PI;
+    constexpr double TwoPI = 2.0 * M_PI;
+    constexpr double NegTwoPI = -TwoPI;
 
     // Just get the first smallest prime factor of N
     //  NOTE : this is key step in the induction for the mixed-radix-Cooley-Tukey FFT algorithm
@@ -119,7 +120,7 @@ namespace FFT {
         std::array<std::complex<float>, p> temp_factors;
         std::array<std::complex<float>, p> temp_results;
         constexpr auto get_factor = [](std::size_t i, std::size_t j, std::size_t k) -> std::complex<float> {
-            const float angle = static_cast<float>(Neg2PI * static_cast<double>(i * (k + j * M)) / static_cast<double>(N));
+            const float angle = static_cast<float>(NegTwoPI * static_cast<double>(i * (k + j * M)) / static_cast<double>(N));
             return {std::cosf(angle), std::sinf(angle)};
         };
             
@@ -143,5 +144,17 @@ namespace FFT {
 
         // This function is in-place! the input is modified with the result.
         return;
+    }
+
+    constexpr void wave_gen(std::complex<float> *data,
+        std::size_t N,
+        unsigned int f = 1,
+        unsigned int phase = 0,
+        unsigned int amp = 1) {
+        for (unsigned int i = 0; i < N; i++) {
+            const float angle = static_cast<float>(TwoPI) * static_cast<float>((i + phase) * f)
+                                  / static_cast<float>(N);
+            data[i] += std::complex<float>{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
+        }
     }
 }

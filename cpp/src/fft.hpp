@@ -176,15 +176,18 @@ namespace FFT {
         return;
     }
 
-    constexpr void wave_gen(std::complex<float> *data,
+    constexpr void wave_gen(std::complex<float> *time_domain, std::complex<float> *freq_domain,
         std::size_t N,
         unsigned int f = 1,
         unsigned int phase = 0,
         unsigned int amp = 1) {
         for (unsigned int i = 0; i < N; i++) {
-            const float angle = static_cast<float>(TwoPI) * static_cast<float>((i + phase) * f)
+            const float angle = static_cast<float>(TwoPI) * static_cast<float>((i * f) + phase)
                                   / static_cast<float>(N);
-            data[i] += std::complex<float>{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
+            time_domain[i] += std::complex<float>{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
         }
+        const float angle = static_cast<float>(TwoPI) * 
+                                  (static_cast<float>(phase) / static_cast<float>(N));
+        freq_domain[f] += std::complex<float>{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
     }
 }

@@ -2,10 +2,19 @@
 #include <complex>
 #include <cstddef>
 #include <cmath>
+#include <arm_neon.h>
 
 namespace FFT {
+    // TODO : implement constexpr trigonometric functions
+
+    // Neon intrinsics
+    inline float32x2_t neon_mul(const float32x2_t &a, const float32x2_t &b) {
+        return {a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]};
+    }
+    
     constexpr double TwoPI = 2.0 * M_PI;
     constexpr double NegTwoPI = -TwoPI;
+    
 
     // Just get the first smallest prime factor of N
     //  NOTE : this is key step in the induction for the mixed-radix-Cooley-Tukey FFT algorithm
@@ -145,11 +154,88 @@ namespace FFT {
         // This function is in-place! the input is modified with the result.
         return;
     }
+    
+    // In-place Mixed Radix Cooley Tukey FFT
+    template <std::size_t N>
+    constexpr void fft_recurse(float32x2_t *data) {
+        // Get first prime factor
+        constexpr auto p = get_prime_factor(N);
+        constexpr auto M = N / p;
+
+        // Base case
+        if constexpr (p < 2) {
+            return;
+        }
+
+        // Transpose Input Data around the radix
+        prime_factor_binner<N>(data);
+
+        // Recursively apply fft to each bin
+        for (std::size_t i = 0; i < p; i++)
+            fft_recurse<M>(data + (i * M));
+
+        // Combine recursive results
+        std::array<float32x2_t, p> temp_factors;
+        std::array<float32x2_t, p> temp_results;
+        
+        // Setup constant factors for incremental rotations by multiplication
+        constexpr float small_angle = static_cast<float>(NegTwoPI / static_cast<double>(N));
+        constexpr float big_angle = static_cast<float>(NegTwoPI / static_cast<double>(p));
+        const float32x2_t small_inc = {std::cosf(small_angle), std::sinf(small_angle)};
+        const float32x2_t big_inc = {std::cosf(big_angle), std::sinf(big_angle)};
+
+        float32x2_t i_factor = {1, 0};
+        for (std::size_t i = 0; i < M; i++) {
+            // Store what strided values are
+            for (std::size_t j = 0; j < p; j++)
+                temp_factors[j] = data[i + (j * M)];
+        
+            // Recursively calculate strided results in temp location
+            float32x2_t j_factor = i_factor;
+            for (std::size_t j = 0; j < p; j++) {
+                temp_results[j] = {0, 0};
+                float32x2_t k_factor = {1, 0};
+                for (std::size_t k = 0; k < p; k++) {
+                    // Finally, do the multiply and accumulate
+                    temp_results[j] += neon_mul(temp_factors[k], k_factor);
+
+                    // Increment k_factor
+                    k_factor = neon_mul(k_factor, j_factor);
+                }
+
+                // Increment j_factor
+                j_factor = neon_mul(j_factor, big_inc);
+            }
+            
+            // Finally write in strided results
+            for (std::size_t j = 0; j < p; j++)
+                data[i + (j * M)] = temp_results[j];
+
+            // Increment i_factor
+            i_factor = neon_mul(i_factor, small_inc);
+        }
+
+        // This function is in-place! the input is modified with the result.
+        return;
+    }
 
     // TODO : may want to shift the result so that DC component is at the center,
     //  but without this shift the FFT and IFFT are inverses of each other
     template <std::size_t N>
     constexpr void fft(std::complex<float> *data) {
+        fft_recurse<N>(data);
+
+        // Normalize
+        // for (std::size_t i = 0; i < N; i++)
+        //    data[i] /= static_cast<float>(N);
+
+        return;
+    }
+
+    // TODO : may want to shift the result so that DC component is at the center,
+    //  but without this shift the FFT and IFFT are inverses of each other
+    template <std::size_t N>
+    constexpr void fft(float32x2_t *data) {
         fft_recurse<N>(data);
 
         // Normalize
@@ -189,5 +275,20 @@ namespace FFT {
         const float angle = static_cast<float>(TwoPI) * 
                                   (static_cast<float>(phase) / static_cast<float>(N));
         freq_domain[f] += std::complex<float>{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
+    }
+
+    constexpr void wave_gen(float32x2_t *time_domain, float32x2_t *freq_domain,
+        std::size_t N,
+        unsigned int f = 1,
+        unsigned int phase = 0,
+        unsigned int amp = 1) {
+        for (unsigned int i = 0; i < N; i++) {
+            const float angle = static_cast<float>(TwoPI) * static_cast<float>((i * f) + phase)
+                                  / static_cast<float>(N);
+            time_domain[i] += float32x2_t{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
+        }
+        const float angle = static_cast<float>(TwoPI) * 
+                                  (static_cast<float>(phase) / static_cast<float>(N));
+        freq_domain[f] += float32x2_t{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
     }
 }

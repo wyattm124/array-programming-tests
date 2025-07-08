@@ -46,11 +46,15 @@
           googlebench
           pkgs.libcxx
           pkgs.fftwFloat
+          pkgs.gperftools
+          pkgs.graphviz
+          pkgs.gv
         ];
 
         shellHook = ''
           export CC=clang
           export CXX=clang++
+          export DISPLAY=:0
         '';
       };
 
@@ -62,6 +66,9 @@
           googlebench
           pkgs.libcxx
           pkgs.fftwFloat
+          pkgs.gperftools
+          pkgs.graphviz
+          pkgs.gv
         ];
       };
     });

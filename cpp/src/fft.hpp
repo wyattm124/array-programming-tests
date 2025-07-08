@@ -4,12 +4,21 @@
 #include <cmath>
 #include <arm_neon.h>
 
+#define MCA_START __asm volatile("# LLVM-MCA-BEGIN");
+#define MCA_END __asm volatile("# LLVM-MCA-END");
+
 namespace FFT {
     // TODO : implement constexpr trigonometric functions
 
     // Neon intrinsics
     inline float32x2_t neon_mul(const float32x2_t &a, const float32x2_t &b) {
         return {a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]};
+    }
+    inline float neon_abs(const float32x2_t &a) {
+        return std::sqrt(a[0]*a[0] + a[1]*a[1]);
+    }
+    inline float32x2_t neon_conj(const float32x2_t &a) {
+        return {a[0], -a[1]};
     }
     
     constexpr double TwoPI = 2.0 * M_PI;
@@ -119,7 +128,9 @@ namespace FFT {
         }
 
         // Transpose Input Data around the radix
+        MCA_START
         prime_factor_binner<N>(data);
+        MCA_END
 
         // Recursively apply fft to each bin
         for (std::size_t i = 0; i < p; i++)
@@ -255,6 +266,23 @@ namespace FFT {
 
         for (std::size_t i = 0; i < N; i++)
             data[i] = std::conj(data[i]);
+
+        // NOTE : if the fft is normalized, the ifft does not need to be normalized
+        //  to keep the ifft the exact inverse operation of the fft.
+
+        return;
+    }
+    
+    template <std::size_t N>
+    // Inverse FFT is just FFT on conj of input, and then conj of output
+    constexpr void ifft(float32x2_t *data) {
+        for (std::size_t i = 0; i < N; i++)
+            data[i] = neon_conj(data[i]);
+
+        fft_recurse<N>(data);
+
+        for (std::size_t i = 0; i < N; i++)
+            data[i] = neon_conj(data[i]);
 
         // NOTE : if the fft is normalized, the ifft does not need to be normalized
         //  to keep the ifft the exact inverse operation of the fft.

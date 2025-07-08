@@ -49,6 +49,7 @@
           pkgs.gperftools
           pkgs.graphviz
           pkgs.gv
+          pkgs.llvmPackages_latest.llvm
         ];
 
         shellHook = ''
@@ -69,6 +70,7 @@
           pkgs.gperftools
           pkgs.graphviz
           pkgs.gv
+          pkgs.llvmPackages_latest.llvm
         ];
       };
     });

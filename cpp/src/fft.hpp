@@ -64,9 +64,10 @@ namespace FFT {
     //  in the same "bin"
     //  NOTE : this is key step in the induction for the in-place mixed-radix-Cooley-Tukey FFT algorithm
     template <std::size_t N, typename T>
-    constexpr void prime_factor_binner(T *data) {
+    constexpr void prime_factor_binner_inplace(T *data) {
         // Get first prime factor
         constexpr auto p = get_prime_factor(N);
+        constexpr auto M = N / p;
 
         // Base case
         if constexpr (p < 2) {
@@ -78,7 +79,6 @@ namespace FFT {
 
         // Given an index n, return the index it should be moved to
         constexpr auto get_next_index = [=](std::size_t n) -> std::size_t {
-            const auto M = N / p;
             const auto i = n % p;
             const auto j = n / p;
             return i * M + j;
@@ -115,6 +115,64 @@ namespace FFT {
         return;
     }
 
+    template <std::size_t N, typename T>
+    constexpr void prime_factor_binner_extra_mem(T *data) {
+        // Get first prime factor
+        constexpr auto p = get_prime_factor(N);
+        constexpr auto M = N / p;
+
+        // Base case
+        if constexpr (p < 2) {
+            return;
+        }
+
+        // Have an array to track which elements have already been placed
+        std::array<T, N> temp;
+
+        // Given an index n, return the index it should be moved to
+        constexpr auto get_next_index = [=](std::size_t n) -> std::size_t {
+            const auto i = n % p;
+            const auto j = n / p;
+            return i * M + j;
+        };
+
+        // get_next_index should represent a bijection
+        for (std::size_t i = 0; i < N; i++) {
+            temp[get_next_index(i)] = data[i];
+        }
+
+        // Copy back result to data
+        for (std::size_t i = 0; i < N; i++) {
+            data[i] = temp[i];
+        }
+        return;
+    }
+
+    template <std::size_t N, typename T>
+    constexpr void prime_factor_binner(T *in, T *out) {
+        // Get first prime factor
+        constexpr auto p = get_prime_factor(N);
+        constexpr auto M = N / p;
+
+        // Base case
+        if constexpr (p < 2) {
+            return;
+        }
+
+        // Given an index n, return the index it should be moved to
+        constexpr auto get_next_index = [=](std::size_t n) -> std::size_t {
+            const auto i = n % p;
+            const auto j = n / p;
+            return i * M + j;
+        };
+
+        // get_next_index should represent a bijection
+        for (std::size_t i = 0; i < N; i++) {
+            out[get_next_index(i)] = in[i];
+        }
+        return;
+    }
+
     // In-place Mixed Radix Cooley Tukey FFT
     template <std::size_t N>
     constexpr void fft_recurse(std::complex<float> *data) {
@@ -128,9 +186,7 @@ namespace FFT {
         }
 
         // Transpose Input Data around the radix
-        MCA_START
-        prime_factor_binner<N>(data);
-        MCA_END
+        prime_factor_binner_inplace<N>(data);
 
         // Recursively apply fft to each bin
         for (std::size_t i = 0; i < p; i++)
@@ -179,11 +235,12 @@ namespace FFT {
         }
 
         // Transpose Input Data around the radix
-        prime_factor_binner<N>(data);
+        std::array<float32x2_t, N> temp;
+        prime_factor_binner<N>(data, temp.data());
 
         // Recursively apply fft to each bin
         for (std::size_t i = 0; i < p; i++)
-            fft_recurse<M>(data + (i * M));
+            fft_recurse<M>(temp.data() + (i * M));
 
         // Combine recursive results
         std::array<float32x2_t, p> temp_factors;
@@ -197,18 +254,14 @@ namespace FFT {
 
         float32x2_t i_factor = {1, 0};
         for (std::size_t i = 0; i < M; i++) {
-            // Store what strided values are
-            for (std::size_t j = 0; j < p; j++)
-                temp_factors[j] = data[i + (j * M)];
-        
             // Recursively calculate strided results in temp location
             float32x2_t j_factor = i_factor;
             for (std::size_t j = 0; j < p; j++) {
-                temp_results[j] = {0, 0};
+                data[i + (j * M)] = {0, 0};
                 float32x2_t k_factor = {1, 0};
                 for (std::size_t k = 0; k < p; k++) {
                     // Finally, do the multiply and accumulate
-                    temp_results[j] += neon_mul(temp_factors[k], k_factor);
+                    data[i + (j * M)] += neon_mul(temp[i + (k * M)], k_factor);
 
                     // Increment k_factor
                     k_factor = neon_mul(k_factor, j_factor);
@@ -218,10 +271,6 @@ namespace FFT {
                 j_factor = neon_mul(j_factor, big_inc);
             }
             
-            // Finally write in strided results
-            for (std::size_t j = 0; j < p; j++)
-                data[i + (j * M)] = temp_results[j];
-
             // Increment i_factor
             i_factor = neon_mul(i_factor, small_inc);
         }

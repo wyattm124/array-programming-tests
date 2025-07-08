@@ -49,7 +49,7 @@
      CHECK(FFT::prime_factorization(13 * 17 * 19) == std::array<size_t, 64>{13, 17, 19});
  }
 
- TEST_CASE("FFT Radix Transposition") {
+ TEST_CASE("FFT Radix Transposition Inplace") {
     // Test Inputs
     std::array<std::complex<float>, 8> data1 = {{0, 1, 2, 3, 4, 5, 6, 7}};
     std::array<std::complex<float>, 9> data2 = {{0, 1, 2, 3, 4, 5, 6, 7, 8}};
@@ -59,8 +59,30 @@
     std::array<std::complex<float>, 9> answer2 = {{0, 3, 6, 1, 4, 7, 2, 5, 8}};
     
     // modify in place
-    FFT::prime_factor_binner<8>(data1.data());
-    FFT::prime_factor_binner<9>(data2.data());
+    FFT::prime_factor_binner_inplace<8>(data1.data());
+    FFT::prime_factor_binner_inplace<9>(data2.data());
+    
+    // Check Outputs
+    for (std::size_t i = 0; i < 8; i++) {
+        CHECK(data1[i] == answer1[i]);
+    }
+    for (std::size_t i = 0; i < 9; i++) {
+        CHECK(data2[i] == answer2[i]);
+    }
+ }
+
+TEST_CASE("FFT Radix Transposition Extra Memory") {
+    // Test Inputs
+    std::array<std::complex<float>, 8> data1 = {{0, 1, 2, 3, 4, 5, 6, 7}};
+    std::array<std::complex<float>, 9> data2 = {{0, 1, 2, 3, 4, 5, 6, 7, 8}};
+
+    // Test Answers
+    std::array<std::complex<float>, 8> answer1 = {{0, 2, 4, 6, 1, 3, 5, 7}};
+    std::array<std::complex<float>, 9> answer2 = {{0, 3, 6, 1, 4, 7, 2, 5, 8}};
+    
+    // modify in place
+    FFT::prime_factor_binner_extra_mem<8>(data1.data());
+    FFT::prime_factor_binner_extra_mem<9>(data2.data());
     
     // Check Outputs
     for (std::size_t i = 0; i < 8; i++) {

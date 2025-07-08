@@ -226,8 +226,8 @@ namespace FFT {
         fft_recurse<N>(data);
 
         // Normalize
-        // for (std::size_t i = 0; i < N; i++)
-        //    data[i] /= static_cast<float>(N);
+        for (std::size_t i = 0; i < N; i++)
+            data[i] /= static_cast<float>(N);
 
         return;
     }

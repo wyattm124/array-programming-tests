@@ -17,9 +17,22 @@
           rev = "v2.4.12";
           sha256 = "sha256-Fxs1EWydhqN9whx+Cn4fnZ4fhCEQvFgL5e9TUiXlnq8="; 
         };
-        buildInputs = [ pkgs.cmake pkgs.ninja pkgs.libcxx ];
+        buildInputs = [ pkgs.cmake pkgs.ninja ];
         CXXFLAGS = "-Wno-unsafe-buffer-usage";
         CMAKE_CXX_FLAGS = [ "-DDOCTEST_WITH_TESTS=OFF" "-DTREAT_WARNINGS_AS_ERRORS=OFF" ];
+      };
+      googlebench = pkgs.stdenv.mkDerivation {
+        pname = "google-benchmark";
+        version = "1.9.4";
+        src = pkgs.fetchgit {
+          url = "https://github.com/google/benchmark.git";
+          rev = "v1.9.4";
+          sha256 = "sha256-P7wJcKkIBoWtN9FCRticpBzYbEZPq71a0iW/2oDTZRU=";
+        };
+        buildInputs = [ pkgs.cmake pkgs.ninja ];
+        cmakeFlags = [
+          "-DBENCHMARK_ENABLE_TESTING=OFF"
+        ];
       };
     in {
       devShells.default = pkgs.mkShell {
@@ -30,7 +43,9 @@
           pkgs.git
           pkgs.ninja
           doctest
+          googlebench
           pkgs.libcxx
+          pkgs.fftwFloat
         ];
 
         shellHook = ''
@@ -44,7 +59,9 @@
           pkgs.clang
           pkgs.cmake
           doctest
+          googlebench
           pkgs.libcxx
+          pkgs.fftwFloat
         ];
       };
     });

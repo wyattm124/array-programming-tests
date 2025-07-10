@@ -242,10 +242,6 @@ namespace FFT {
         for (std::size_t i = 0; i < p; i++)
             fft_recurse<M>(temp.data() + (i * M));
 
-        // Combine recursive results
-        std::array<float32x2_t, p> temp_factors;
-        std::array<float32x2_t, p> temp_results;
-        
         // Setup constant factors for incremental rotations by multiplication
         constexpr float small_angle = static_cast<float>(NegTwoPI / static_cast<double>(N));
         constexpr float big_angle = static_cast<float>(NegTwoPI / static_cast<double>(p));

@@ -11,13 +11,13 @@ namespace FFT {
     // TODO : implement constexpr trigonometric functions
 
     // Neon intrinsics
-    inline float32x2_t neon_mul(const float32x2_t &a, const float32x2_t &b) {
+    inline float32x2_t neon_mul(const float32x2_t &__restrict__ a, const float32x2_t &__restrict__ b) noexcept {
         return {a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]};
     }
-    inline float neon_abs(const float32x2_t &a) {
+    inline float neon_abs(const float32x2_t &__restrict__ a) noexcept {
         return std::sqrt(a[0]*a[0] + a[1]*a[1]);
     }
-    inline float32x2_t neon_conj(const float32x2_t &a) {
+    inline float32x2_t neon_conj(const float32x2_t &__restrict__ a) noexcept {
         return {a[0], -a[1]};
     }
     
@@ -149,7 +149,7 @@ namespace FFT {
     }
 
     template <std::size_t N, typename T>
-    constexpr void prime_factor_binner(T *in, T *out) {
+    constexpr void prime_factor_binner(T *__restrict__ in, T *__restrict__ out) noexcept {
         // Get first prime factor
         constexpr auto p = get_prime_factor(N);
         constexpr auto M = N / p;
@@ -160,7 +160,7 @@ namespace FFT {
         }
 
         // Given an index n, return the index it should be moved to
-        constexpr auto get_next_index = [=](std::size_t n) -> std::size_t {
+        constexpr auto get_next_index = [=](std::size_t n) noexcept -> std::size_t {
             const auto i = n % p;
             const auto j = n / p;
             return i * M + j;
@@ -224,7 +224,7 @@ namespace FFT {
     
     // In-place Mixed Radix Cooley Tukey FFT
     template <std::size_t N>
-    constexpr void fft_recurse(float32x2_t *data) {
+    constexpr void fft_recurse(float32x2_t *__restrict__ data) noexcept {
         // Get first prime factor
         constexpr auto p = get_prime_factor(N);
         constexpr auto M = N / p;
@@ -291,7 +291,7 @@ namespace FFT {
     // TODO : may want to shift the result so that DC component is at the center,
     //  but without this shift the FFT and IFFT are inverses of each other
     template <std::size_t N>
-    constexpr void fft(float32x2_t *data) {
+    constexpr void fft(float32x2_t *__restrict__ data) noexcept {
         fft_recurse<N>(data);
 
         // Normalize
@@ -320,7 +320,7 @@ namespace FFT {
     
     template <std::size_t N>
     // Inverse FFT is just FFT on conj of input, and then conj of output
-    constexpr void ifft(float32x2_t *data) {
+    constexpr void ifft(float32x2_t *__restrict__ data) noexcept {
         for (std::size_t i = 0; i < N; i++)
             data[i] = neon_conj(data[i]);
 

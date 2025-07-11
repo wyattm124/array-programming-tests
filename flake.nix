@@ -58,7 +58,8 @@
           build () {
             clang++ -std=c++23 fft_tests.cpp -o ../bin/fft_tests && \
             clang++ -std=c++23 fft_bench.cpp -lbenchmark -pthread -lfftw3f -o ../bin/fft_bench && \
-            clang++ -std=c++23 fft_profile.cpp -lprofiler -o ../bin/fft_profile
+            clang++ -std=c++23 fft_profile.cpp -lprofiler -o ../bin/fft_profile && \
+            clang++ -std=c++23 cheb_tests.cpp -o ../bin/cheb_tests
           }
         '';
       };

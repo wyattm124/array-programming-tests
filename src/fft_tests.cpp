@@ -1,17 +1,9 @@
-/* Restrictions:
- * (1) all data accessed by these operations must be of known size of compile time known
- *   size and type
- * (2) all indexing operations must be constexpr qualifiable - that is they can be fully
- *   fully defined and potentially evaluted at compile time
- * (3) 
- */
+#include "fft.hpp"
 
- #include "fft.hpp"
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <doctest/doctest.h>
 
- #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
- #include <doctest/doctest.h>
-
- // Your test cases go here
+// Your test cases go here
  TEST_CASE("Prime Factorization") {
      CHECK(FFT::prime_factorization(1) == std::array<size_t, 64>{1});
      CHECK(FFT::prime_factorization(2) == std::array<size_t, 64>{2});

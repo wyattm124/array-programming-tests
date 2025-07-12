@@ -74,3 +74,26 @@
     CHECK(acc_error3 < 1e-6);
     CHECK(acc_error4 < 1e-6);
 }
+
+TEST_CASE("Cheb Approx Trig") {
+    constexpr int range = 128;
+    const auto my_sin = [](double x) -> double { return std::sin(M_PI * x); };
+    const auto coef1 = cheb_gen_coef<16>(my_sin);
+    std::array<double, 16> coef1_array;
+    std::copy(coef1.begin(), coef1.end(), coef1_array.begin());
+
+    const auto my_cos = [](double x) -> double { return std::cos(M_PI * x); };
+    const auto coef2 = cheb_gen_coef<16>(my_cos);
+    std::array<double, 16> coef2_array;
+    std::copy(coef2.begin(), coef2.end(), coef2_array.begin());
+    
+    double acc_error1 = 0;
+    double acc_error2 = 0;
+    for (int i = -range; i < range; i++) {
+        const double x = static_cast<double>(i) / range;
+        acc_error1 += std::abs(my_sin(x) - cheb_approx(x, coef1_array));
+        acc_error2 += std::abs(my_cos(x) - cheb_approx(x, coef2_array));
+    }
+    CHECK(acc_error1 < 1e-6);
+    CHECK(acc_error2 < 1e-6);
+}

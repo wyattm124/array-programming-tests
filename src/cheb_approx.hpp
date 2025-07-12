@@ -40,18 +40,18 @@ constexpr std::array<double, N> cheb_gen_coef(const std::function<double(double)
     std::array<double, N> result;
     for (std::size_t i = 0; i < N; i++) {
       double coef = 0;
-      for (std::size_t j = 1; j < N + 1; j++) {
-        const double x = std::cos(M_PI * (static_cast<double>(i) - 0.5) / static_cast<double>(N));
+      for (std::size_t j = 0; j < N + 1; j++) {
+        const double x = std::cos(M_PI * ((static_cast<double>(j) + 0.5) / static_cast<double>(N + 1)));
         coef += f(x) * cheb_poly(i, x);
       }
-      result[i] = (2 * coef) / static_cast<double>(N);
+      result[i] = 2 * coef / static_cast<double>(N + 1);
     }
     return result;
 }
 
 template <std::size_t N>
 constexpr double cheb_approx(double x, const std::array<double, N> &coef) noexcept {
-    double result = -0.5 * coef[0];
+    double result = 0.5 * coef[0];
     for (std::size_t i = 1; i < N; i++) {
         result += coef[i] * cheb_poly(i, x);
     }

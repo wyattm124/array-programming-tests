@@ -11,7 +11,10 @@ int main() {
         FFT::wave_gen(time_domain1.data(), freq_domain1.data(), N,
             (i * 7) % 8191, (i + 3) % 7, i % 11);
     }
+
+    // TODO : have to initialize before Profile run!
+
     //ProfilerStart("fft power of 2");
-    FFT::fft<N>(time_domain1.data());
+    FFT::FFTPlan<N>::fft(time_domain1.data());
     //ProfilerStop();
 }

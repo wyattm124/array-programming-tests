@@ -241,22 +241,32 @@ TEST_CASE("FFT NEON") {
     FFT::FFTPlan<M>::fft(time_domain2.data());
 
     // Check Outputs
+    float max_error = 0;
     for (std::size_t i = 0; i < N; i++) {
-        CHECK(FFT::neon_abs(time_domain1[i] - freq_domain1[i]) < 2.5e-7);
+        max_error = std::max(max_error, FFT::neon_abs(time_domain1[i] - freq_domain1[i]));
     }
+    CHECK(max_error < 5e-7);
+    
+    max_error = 0;
     for (std::size_t i = 0; i < M; i++) {
-        CHECK(FFT::neon_abs(time_domain2[i] - freq_domain2[i]) < 5e-5);
+        max_error = std::max(max_error, FFT::neon_abs(time_domain2[i] - freq_domain2[i]));
     }
+    CHECK(max_error < 5e-7);
 
     // modify in place back to time domain
     FFT::FFTPlan<N>::ifft(time_domain1.data());
     FFT::FFTPlan<M>::ifft(time_domain2.data());
     
     // Check Outputs
+    max_error = 0;
     for (std::size_t i = 0; i < N; i++) {
-        CHECK(FFT::neon_abs(time_domain1[i] - time_domain1_copy[i]) < 2e-6);
+        max_error = std::max(max_error, FFT::neon_abs(time_domain1[i] - time_domain1_copy[i]));
     }
+    CHECK(max_error < 5e-7);
+    
+    max_error = 0;
     for (std::size_t i = 0; i < M; i++) {
-        CHECK(FFT::neon_abs(time_domain2[i] - time_domain2_copy[i]) < 5e-3);
+        max_error = std::max(max_error, FFT::neon_abs(time_domain2[i] - time_domain2_copy[i]));
     }
+    CHECK(max_error < 2e-6);
  }

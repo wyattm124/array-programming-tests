@@ -113,7 +113,10 @@ namespace FFT {
                 for (std::size_t j = 0; j < p; j++) {
                     data[i + (j * M)] = {0, 0};
                     for (std::size_t k = 0; k < p; k++) {
-                        data[i + (j * M)] += neon_mul(temp[i + (k * M)], get_coefs()[i * p * p + j * p + k]);
+                        data[i + (j * M)] += 
+                            neon_mul(
+                                temp[i + (k * M)],
+                                get_coefs_by_angle()[i * p * p + j * p + k]);
                     }
                 }
             }
@@ -122,7 +125,7 @@ namespace FFT {
             return;
         }
     private:
-        static float32x2_t* get_coefs() {
+        static float32x2_t* get_coefs_by_mult() {
             static float32x2_t* coefs = []{
                 float32x2_t* result = new float32x2_t[N * p];
             
@@ -146,6 +149,26 @@ namespace FFT {
                         j_factor = neon_mul(j_factor, big_inc);
                     }
                     i_factor = neon_mul(i_factor, small_inc);
+                }
+                return result;
+            }();
+            return coefs;
+        }
+        
+        static float32x2_t get_factor_by_angle(std::size_t i, std::size_t j, std::size_t k) {
+            const double angle = NegTwoPI * static_cast<double>(i * (k + j * M)) / static_cast<double>(N);
+            return {static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
+        };
+        static float32x2_t* get_coefs_by_angle() {
+            static float32x2_t* coefs = []{
+                float32x2_t* result = new float32x2_t[N * p];
+            
+                for (std::size_t i = 0; i < M; i++) {
+                    for (std::size_t j = 0; j < p; j++) {
+                        for (std::size_t k = 0; k < p; k++) {
+                            result[i * p * p + j * p + k] = get_factor_by_angle(k, j, i);
+                        }
+                    }
                 }
                 return result;
             }();

@@ -24,6 +24,9 @@ static void BM_Neon_Powerof2FFT(benchmark::State& state) {
         FFT::wave_gen(time_domain1.data(), freq_domain1.data(), N,
             (i * 7) % 8191, (i + 3) % 7, i % 11);
     }
+
+    // Make sure coeffs are calculated ahead of time
+    FFT::FFTPlan<N>::fft(time_domain1.data());
     for (auto _ : state) {
         FFT::FFTPlan<N>::fft(time_domain1.data());
     }
@@ -85,6 +88,7 @@ static void BM_Neon_MersennePrimeFFT(benchmark::State& state) {
             (i * 7) % 8191, (i + 3) % 7, i % 11);
     }
 
+    // Make sure coeffs are calculated ahead of time
     FFT::FFTPlan<N>::fft(time_domain1.data());
     for (auto _ : state) {
         FFT::FFTPlan<N>::fft(time_domain1.data());

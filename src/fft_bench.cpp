@@ -17,14 +17,15 @@ static void BM_Powerof2FFT(benchmark::State& state) {
 
 // Define another benchmark
 static void BM_Neon_Powerof2FFT(benchmark::State& state) {
-    std::array<float32x2_t, 8192> time_domain1 = {0};
-    std::array<float32x2_t, 8192> freq_domain1 = {0};
-    for (std::size_t i = 0; i < 8192; i++) {
-        FFT::wave_gen(time_domain1.data(), freq_domain1.data(), 8192,
+    constexpr size_t N = 8192 / 512;
+    std::array<float32x2_t, N> time_domain1 = {0};
+    std::array<float32x2_t, N> freq_domain1 = {0};
+    for (std::size_t i = 0; i < N; i++) {
+        FFT::wave_gen(time_domain1.data(), freq_domain1.data(), N,
             (i * 7) % 8191, (i + 3) % 7, i % 11);
     }
     for (auto _ : state) {
-        FFT::fft<8192>(time_domain1.data());
+        FFT::FFTPlan<N>::fft(time_domain1.data());
     }
 }
 
@@ -76,14 +77,17 @@ static void BM_MersennePrimeFFT(benchmark::State& state) {
 }
 
 static void BM_Neon_MersennePrimeFFT(benchmark::State& state) {
-    std::array<float32x2_t, 8191> time_domain1 = {0};
-    std::array<float32x2_t, 8191> freq_domain1 = {0};
-    for (std::size_t i = 0; i < 8191; i++) {
-        FFT::wave_gen(time_domain1.data(), freq_domain1.data(), 8191,
+    constexpr size_t N = 8191; // 8191;
+    std::array<float32x2_t, N> time_domain1 = {0};
+    std::array<float32x2_t, N> freq_domain1 = {0};
+    for (std::size_t i = 0; i < N; i++) {
+        FFT::wave_gen(time_domain1.data(), freq_domain1.data(), N,
             (i * 7) % 8191, (i + 3) % 7, i % 11);
     }
+
+    FFT::FFTPlan<N>::fft(time_domain1.data());
     for (auto _ : state) {
-        FFT::fft<8191>(time_domain1.data());
+        FFT::FFTPlan<N>::fft(time_domain1.data());
     }
 }
 

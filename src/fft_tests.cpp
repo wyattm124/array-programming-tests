@@ -170,3 +170,93 @@ TEST_CASE("FFT NEON") {
         CHECK(FFT::neon_abs(time_domain2[i] - time_domain2_copy[i]) < 1e-6);
     }
  }
+
+ TEST_CASE("FFT NEON Precomputed Plan") {
+    // Test Inputs
+    std::array<float32x2_t, 8> time_domain1 = {0};
+    std::array<float32x2_t, 8> freq_domain1 = {0};
+    FFT::wave_gen(time_domain1.data(), freq_domain1.data(), 8, 1, 1, 1);
+    FFT::wave_gen(time_domain1.data(), freq_domain1.data(), 8, 2, 3, 1);
+    std::array<float32x2_t, 8> time_domain1_copy;
+    for (std::size_t i = 0; i < 8; i++)
+        time_domain1_copy[i] = time_domain1[i];
+
+    std::array<float32x2_t, 9> time_domain2 = {0};
+    std::array<float32x2_t, 9> freq_domain2 = {0};
+    FFT::wave_gen(time_domain2.data(), freq_domain2.data(), 9, 1, 3, 1);
+    FFT::wave_gen(time_domain2.data(), freq_domain2.data(), 9, 3, 4, 1);
+    std::array<float32x2_t, 9> time_domain2_copy;
+    for (std::size_t i = 0; i < 9; i++)
+        time_domain2_copy[i] = time_domain2[i]; 
+
+    // modify in place to frequency domain
+    FFT::FFTPlan<8>::fft(time_domain1.data());
+    FFT::FFTPlan<9>::fft(time_domain2.data());
+
+    // Check Outputs
+    for (std::size_t i = 0; i < 8; i++) {
+        CHECK(FFT::neon_abs(time_domain1[i] - freq_domain1[i]) < 1e-6);
+    }
+    for (std::size_t i = 0; i < 9; i++) {
+        CHECK(FFT::neon_abs(time_domain2[i] - freq_domain2[i]) < 1e-6);
+    }
+
+    // modify in place back to time domain
+    FFT::FFTPlan<8>::ifft(time_domain1.data());
+    FFT::FFTPlan<9>::ifft(time_domain2.data());
+    
+    // Check Outputs
+    for (std::size_t i = 0; i < 8; i++) {
+        CHECK(FFT::neon_abs(time_domain1[i] - time_domain1_copy[i]) < 1e-6);
+    }
+    for (std::size_t i = 0; i < 9; i++) {
+        CHECK(FFT::neon_abs(time_domain2[i] - time_domain2_copy[i]) < 1e-6);
+    }
+ }
+
+ // TODO : these are outside bounds of error!
+ TEST_CASE("FFT NEON Precomputed Large Plan") {
+    constexpr size_t N = 128;//8192;
+    constexpr size_t M = 127;//8191;
+
+    // Test Inputs
+    std::array<float32x2_t, N> time_domain1 = {0};
+    std::array<float32x2_t, N> freq_domain1 = {0};
+    FFT::wave_gen(time_domain1.data(), freq_domain1.data(), N, 1, 1, 1);
+    FFT::wave_gen(time_domain1.data(), freq_domain1.data(), N, 2, 3, 1);
+    std::array<float32x2_t, N> time_domain1_copy;
+    for (std::size_t i = 0; i < N; i++)
+        time_domain1_copy[i] = time_domain1[i];
+
+    std::array<float32x2_t, M> time_domain2 = {0};
+    std::array<float32x2_t, M> freq_domain2 = {0};
+    FFT::wave_gen(time_domain2.data(), freq_domain2.data(), M, 1, 3, 1);
+    FFT::wave_gen(time_domain2.data(), freq_domain2.data(), M, 3, 4, 1);
+    std::array<float32x2_t, M> time_domain2_copy;
+    for (std::size_t i = 0; i < M; i++)
+        time_domain2_copy[i] = time_domain2[i]; 
+
+    // modify in place to frequency domain
+    FFT::FFTPlan<N>::fft(time_domain1.data());
+    FFT::FFTPlan<M>::fft(time_domain2.data());
+
+    // Check Outputs
+    for (std::size_t i = 0; i < N; i++) {
+        CHECK(FFT::neon_abs(time_domain1[i] - freq_domain1[i]) < 2.5e-7);
+    }
+    for (std::size_t i = 0; i < M; i++) {
+        CHECK(FFT::neon_abs(time_domain2[i] - freq_domain2[i]) < 5e-5);
+    }
+
+    // modify in place back to time domain
+    FFT::FFTPlan<N>::ifft(time_domain1.data());
+    FFT::FFTPlan<M>::ifft(time_domain2.data());
+    
+    // Check Outputs
+    for (std::size_t i = 0; i < N; i++) {
+        CHECK(FFT::neon_abs(time_domain1[i] - time_domain1_copy[i]) < 2e-6);
+    }
+    for (std::size_t i = 0; i < M; i++) {
+        CHECK(FFT::neon_abs(time_domain2[i] - time_domain2_copy[i]) < 5e-3);
+    }
+ }

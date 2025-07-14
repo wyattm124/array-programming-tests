@@ -60,6 +60,114 @@ namespace FFT {
         return factors;
     }
 
+    template <std::size_t N>
+    class FFTPlan {
+    public:
+        static constexpr std::size_t p = get_prime_factor(N);
+        static constexpr std::size_t M = N / p;
+
+        // TODO : may want to shift the result so that DC component is at the center,
+        //  but without this shift the FFT and IFFT are inverses of each other
+        static void fft(float32x2_t *__restrict__ data) noexcept {
+            fft_recurse(data);
+
+            // Normalize
+            for (std::size_t i = 0; i < N; i++)
+                data[i] /= static_cast<float>(N);
+
+            return;
+        }
+
+        static void ifft(float32x2_t *__restrict__ data) noexcept {
+            for (std::size_t i = 0; i < N; i++)
+                data[i] = neon_conj(data[i]);
+
+            fft_recurse(data);
+
+            for (std::size_t i = 0; i < N; i++)
+                data[i] = neon_conj(data[i]);
+
+            // NOTE : if the fft is normalized, the ifft does not need to be normalized
+            //  to keep the ifft the exact inverse operation of the fft.
+
+            return;
+        }
+        
+        // In-place Mixed Radix Cooley Tukey FFT
+        static void fft_recurse(float32x2_t *__restrict__ data) noexcept {
+            // Base case
+            if constexpr (p < 2) {
+                return;
+            }
+
+            // Transpose Input Data around the radix
+            std::array<float32x2_t, N> temp;
+            prime_factor_binner(data, temp.data());
+
+            // Recursively apply fft to each bin
+            for (std::size_t i = 0; i < p; i++)
+                FFTPlan<M>::fft_recurse(temp.data() + (i * M));
+
+            // Do tensor multiplication of coeffs with data
+            for (std::size_t i = 0; i < M; i++) {
+                for (std::size_t j = 0; j < p; j++) {
+                    data[i + (j * M)] = {0, 0};
+                    for (std::size_t k = 0; k < p; k++) {
+                        data[i + (j * M)] += neon_mul(temp[i + (k * M)], get_coefs()[i * p * p + j * p + k]);
+                    }
+                }
+            }
+
+            // This function is in-place! the input is modified with the result.
+            return;
+        }
+    private:
+        static float32x2_t* get_coefs() {
+            static float32x2_t* coefs = []{
+                float32x2_t* result = new float32x2_t[N * p];
+            
+                // Setup constant factors for incremental rotations by multiplication
+                constexpr float small_angle = 
+                    static_cast<float>(NegTwoPI / static_cast<double>(N));
+                constexpr float big_angle = 
+                    static_cast<float>(NegTwoPI / static_cast<double>(p));
+                const float32x2_t small_inc = {std::cosf(small_angle), std::sinf(small_angle)};
+                const float32x2_t big_inc = {std::cosf(big_angle), std::sinf(big_angle)};
+        
+                float32x2_t i_factor = {1, 0};
+                for (std::size_t i = 0; i < M; i++) {
+                    float32x2_t j_factor = i_factor;
+                    for (std::size_t j = 0; j < p; j++) {
+                        float32x2_t k_factor = {1, 0};
+                        for (std::size_t k = 0; k < p; k++) {
+                            result[i * p * p + j * p + k] = k_factor;
+                            k_factor = neon_mul(k_factor, j_factor);
+                        }
+                        j_factor = neon_mul(j_factor, big_inc);
+                    }
+                    i_factor = neon_mul(i_factor, small_inc);
+                }
+                return result;
+            }();
+            return coefs;
+        }
+        static void prime_factor_binner(float32x2_t *__restrict__ in, float32x2_t *__restrict__ out) noexcept {
+            // Base case
+            if constexpr (p < 2) {
+                return;
+            }
+
+            // get_next_index should represent a bijection
+            for (std::size_t n = 0; n < N; n++) {
+                const auto i = n % p;
+                const auto j = n / p;
+                const auto k = i * M + j;
+                out[k] = in[n];
+            }
+            return;
+        }
+    };
+
     // For a prime p of N, transpose the array so indexes of the same mod p are in order
     //  in the same "bin"
     //  NOTE : this is key step in the induction for the in-place mixed-radix-Cooley-Tukey FFT algorithm

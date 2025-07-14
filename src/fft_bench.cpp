@@ -51,7 +51,7 @@ static void BM_FFTW_Powerof2FFT(benchmark::State& state) {
     }
 
     // Set the plan
-    p = fftwf_plan_dft_1d(8192, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    p = fftwf_plan_dft_1d(8192, in, out, FFTW_FORWARD, FFTW_MEASURE);
 
     // Benchmark
     for (auto _ : state) {
@@ -113,7 +113,7 @@ static void BM_FFTW_MersennePrimeFFT(benchmark::State& state) {
     }
 
     // Set the plan
-    p = fftwf_plan_dft_1d(8191, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
+    p = fftwf_plan_dft_1d(8191, in, out, FFTW_FORWARD, FFTW_MEASURE);
 
     // Benchmark
     for (auto _ : state) {

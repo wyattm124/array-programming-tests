@@ -62,6 +62,9 @@
             clang++ -std=c++23 -O3 cheb_tests.cpp -o ../bin/cheb_tests && \
             clang++ -std=c++23 -O3 prime_factor.cpp -o ../bin/prime_factor
           }
+          mca_timeline () {
+            clang++ fft_profile.cpp -O2 -S -o - | llvm-mca -skip-unsupported-instructions=lack-sched --timeline
+          }
         '';
       };
 

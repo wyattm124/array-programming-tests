@@ -82,15 +82,21 @@ namespace FFT {
                 FFTPlan<M>::fft_recurse(temp.data() + (i * M));
 
             // Do tensor multiplication of coeffs with data
+            float32x2_t* coefs = gen_coefs_by_angle();
             for (std::size_t i = 0; i < M; i++) {
                 for (std::size_t j = 0; j < p; j++) {
-                    data[i + (j * M)] = {0, 0};
+                    float32x2_t temp_ans = {0, 0};
                     for (std::size_t k = 0; k < p; k++) {
-                        data[i + (j * M)] += 
-                            neon_mul_vol(
-                                temp[i + (k * M)],
-                                gen_coefs_by_angle()[i * p * p + j * p + k]);
+                        MCA_START
+                        const auto index = i * p * p + j * p + k;
+                        const auto real_coeff = coefs[2 * index];
+                        const auto imag_coeff = coefs[(2 * index) + 1];
+                        const auto temp_val = temp[i + (k * M)];
+                        temp_ans[0] += temp_val[0] * real_coeff[0] + temp_val[1] * real_coeff[1];
+                        temp_ans[1] += temp_val[0] * imag_coeff[0] + temp_val[1] * imag_coeff[1];
+                        MCA_END
                     }
+                    data[i + (j * M)] = temp_ans;
                 }
             }
 
@@ -208,19 +214,22 @@ namespace FFT {
         };
         static float32x2_t* gen_coefs_by_angle() {
             static float32x2_t* coefs = []{
-                float32x2_t* result = new float32x2_t[N * p];
+                float32x2_t* result = new float32x2_t[N * p * 2];
             
                 for (std::size_t i = 0; i < M; i++) {
                     for (std::size_t j = 0; j < p; j++) {
                         for (std::size_t k = 0; k < p; k++) {
-                            result[i * p * p + j * p + k] = gen_factor_by_angle(k, j, i);
+                            const auto index = i * p * p + j * p + k;
+                            const auto temp = gen_factor_by_angle(k, j, i);
+                            result[2 * index] = {temp[0], -(temp[1])};
+                            result[(2 * index) + 1] = {temp[1], temp[0]};
                         }
                     }
                 }
                 return result;
             }();
             return coefs;
-        }
+        } 
     };
 
     template <std::size_t N>

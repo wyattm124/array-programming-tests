@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cmath>
 #include <arm_neon.h>
+#include "prime_factor.hpp"
+#include <iostream>
 
 // For LLVM MCA Analysis
 #define MCA_START __asm volatile("# LLVM-MCA-BEGIN");
@@ -13,6 +15,9 @@ namespace FFT {
     inline float32x2_t neon_mul(const float32x2_t &__restrict__ a, const float32x2_t &__restrict__ b) noexcept {
         return {a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]};
     }
+    inline float32x2_t neon_mul_vol(const float32x2_t &__restrict__ a, const volatile float32x2_t &__restrict__ b) noexcept {
+        return {a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]};
+    }
     inline float neon_abs(const float32x2_t &__restrict__ a) noexcept {
         return std::sqrt(a[0]*a[0] + a[1]*a[1]);
     }
@@ -21,49 +26,18 @@ namespace FFT {
     }
     
     constexpr double TwoPI = 2.0 * M_PI;
-    constexpr double NegTwoPI = -TwoPI;
-    
-
-    // Just get the first smallest prime factor of N
-    //  NOTE : this is key step in the induction for the mixed-radix-Cooley-Tukey FFT algorithm
-    constexpr std::size_t get_prime_factor(std::size_t N) {
-        for (std::size_t i = 2; i * i <= N; i++) {
-            if (N % i == 0) {
-                return i;
-            }
-        }
-        return N;
-    }
-
-    // NOTE : This is only for testing the get_prime_factor function
-    constexpr std::array<std::size_t, 64> prime_factorization(std::size_t n) {
-        // Take care of "degenerate" edge cases
-        std::array<std::size_t, 64> factors = {0};
-        if (n == 0) {
-            return factors;
-        } else if (n == 1) {
-            factors[0] = 1;
-            return factors;
-        }
-
-        // For all other cases, do the usual loop
-        std::size_t factor_count = 0;
-        std::size_t p = get_prime_factor(n);
-        while (p > 1) {
-            while (n % p == 0) {
-                factors[factor_count++] = p;
-                n /= p;
-            }
-            p = get_prime_factor(n);
-        }
-        return factors;
-    }
+    constexpr double NegTwoPI = -TwoPI; 
 
     template <std::size_t N>
     class FFTPlan {
         public:
-        static constexpr std::size_t p = get_prime_factor(N);
+        static constexpr std::size_t p = prime_factor::get_prime_factor(N);
         static constexpr std::size_t M = N / p;
+
+        FFTPlan() {
+            // Ensure the coeffs are calculated
+            volatile auto* coefs = gen_coefs_by_angle();
+        }
 
         // TODO : may want to shift the result so that DC component is at the center,
         //  but without this shift the FFT and IFFT are inverses of each other
@@ -113,9 +87,9 @@ namespace FFT {
                     data[i + (j * M)] = {0, 0};
                     for (std::size_t k = 0; k < p; k++) {
                         data[i + (j * M)] += 
-                            neon_mul(
+                            neon_mul_vol(
                                 temp[i + (k * M)],
-                                get_coefs_by_angle()[i * p * p + j * p + k]);
+                                gen_coefs_by_angle()[i * p * p + j * p + k]);
                     }
                 }
             }
@@ -194,7 +168,8 @@ namespace FFT {
         //   calculate the actual DFT components, but calculating them ahead of time reduces
         //   done in the DFT itself for the angle based method, and grealy reduces loop
         //   dependencies for the multiplication based method.
-
+        // static float32x2_t* coefs;
+        
         // NOTE : Although this is technically correct to calculate coeffs, it is not as
         //   numerically stable as the angle based method.
         static float32x2_t* get_coefs_by_mult() {
@@ -227,30 +202,30 @@ namespace FFT {
             return coefs;
         }
         
-        static float32x2_t get_factor_by_angle(std::size_t i, std::size_t j, std::size_t k) {
+        static float32x2_t gen_factor_by_angle(std::size_t i, std::size_t j, std::size_t k) {
             const double angle = NegTwoPI * static_cast<double>(i * (k + j * M)) / static_cast<double>(N);
             return {static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
         };
-        static float32x2_t* get_coefs_by_angle() {
+        static float32x2_t* gen_coefs_by_angle() {
             static float32x2_t* coefs = []{
                 float32x2_t* result = new float32x2_t[N * p];
             
                 for (std::size_t i = 0; i < M; i++) {
                     for (std::size_t j = 0; j < p; j++) {
                         for (std::size_t k = 0; k < p; k++) {
-                            result[i * p * p + j * p + k] = get_factor_by_angle(k, j, i);
+                            result[i * p * p + j * p + k] = gen_factor_by_angle(k, j, i);
                         }
                     }
                 }
                 return result;
             }();
             return coefs;
-        } 
+        }
     };
 
     template <std::size_t N>
     struct FFTPlanBasic {
-        static constexpr auto p = get_prime_factor(N);
+        static constexpr auto p = prime_factor::get_prime_factor(N);
         static constexpr auto M = N / p;
 
         // TODO : may want to shift the result so that DC component is at the center,
@@ -330,7 +305,7 @@ namespace FFT {
             // This function is in-place! the input is modified with the result.
             return;
         }
-    };
+    }; 
 
     constexpr void wave_gen(std::complex<float> *time_domain, std::complex<float> *freq_domain,
         std::size_t N,
@@ -360,5 +335,25 @@ namespace FFT {
         const float angle = static_cast<float>(TwoPI) * 
                                   (static_cast<float>(phase) / static_cast<float>(N));
         freq_domain[f] += float32x2_t{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
+    }
+
+    constexpr void wave_gen_lcg(std::complex<float> *time_domain, std::complex<float> *freq_domain,
+        std::size_t N) {
+        for (unsigned int i = 0; i < 13; i++) {
+            wave_gen(time_domain, freq_domain, N,
+                ((i + 7) * 3) % N,
+                ((i + 5) * 11) % N,
+                ((i + 11) * 13) % N);
+        }
+    }
+
+    constexpr void wave_gen_lcg(float32x2_t *time_domain, float32x2_t *freq_domain,
+        std::size_t N) {
+        for (unsigned int i = 0; i < 13; i++) {
+            wave_gen(time_domain, freq_domain, N,
+                ((i + 7) * 3) % N,
+                ((i + 5) * 11) % N,
+                ((i + 11) * 13) % N);
+        }
     }
 }

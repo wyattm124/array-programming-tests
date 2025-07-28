@@ -15,9 +15,6 @@ namespace FFT {
     inline float32x2_t neon_mul(const float32x2_t &__restrict__ a, const float32x2_t &__restrict__ b) noexcept {
         return {a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]};
     }
-    inline float32x2_t neon_mul_vol(const float32x2_t &__restrict__ a, const volatile float32x2_t &__restrict__ b) noexcept {
-        return {a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]};
-    }
     inline float neon_abs(const float32x2_t &__restrict__ a) noexcept {
         return std::sqrt(a[0]*a[0] + a[1]*a[1]);
     }

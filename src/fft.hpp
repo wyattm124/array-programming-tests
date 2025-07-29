@@ -70,31 +70,76 @@ namespace FFT {
                 return;
             }
 
-            // Transpose Input Data around the radix
+            // In any case, we will need a copy of the input data
             std::array<float32x2_t, N> temp;
-            prime_factor_binner(data, temp.data());
 
-            // Recursively apply fft to each bin
-            for (std::size_t i = 0; i < p; i++)
-                FFTPlan<M>::fft_recurse(temp.data() + (i * M));
+            // If M == 1, then we are about to do an DFT in any case and it is best to
+            //  save the cost of a transposition, and get better data locality.
+            //  Similarly if the DFT is small, it will be faster to do the DFT
+            //  Than try to do a recursive Cooley Tookey around a Radix
+            constexpr bool do_dft = M == 1;
+            if constexpr (!do_dft) {
+                // Transpose Input Data around the radix
+                prime_factor_binner(data, temp.data());
+
+                // Recursively apply fft to each bin
+                for (unsigned int i = 0; i < p; i++)
+                    FFTPlan<M>::fft_recurse(temp.data() + (i * M));
+            }
 
             // Do tensor multiplication of coeffs with data
-            float32x2_t* coefs = gen_coefs_by_angle();
-            for (std::size_t i = 0; i < M; i++) {
-                for (std::size_t j = 0; j < p; j++) {
-                    float32x2_t temp_ans = {0, 0};
-                    for (std::size_t k = 0; k < p; k++) {
-                        MCA_START
-                        const auto index = i * p * p + j * p + k;
-                        const auto real_coeff = coefs[2 * index];
-                        const auto imag_coeff = coefs[(2 * index) + 1];
-                        const auto temp_val = temp[i + (k * M)];
-                        temp_ans[0] += temp_val[0] * real_coeff[0] + temp_val[1] * real_coeff[1];
-                        temp_ans[1] += temp_val[0] * imag_coeff[0] + temp_val[1] * imag_coeff[1];
-                        MCA_END
+            float32x4_t* const coefs = gen_coefs_by_angle();
+            for (unsigned int i = 0; i < M; i++) {
+
+                // Load first level of tree reduce, with the multiply into local storage
+                std::array<float32x2_t, p> temp_ans = {{0, 0}};
+                for (unsigned int j = 0; j < p; j++) {
+                    MCA_START
+                    std::array<float32x2_t, p/2> temp_reduce;
+                    #pragma clang loop unroll_count(32)
+                    for (unsigned int k = 0; k < p/2; k++) {
+                        const float32x4_t coef[2] = {coefs[i * p * p + j * p + k], coefs[i * p * p + j * p + k + p/2]};
+                        const float32x2_t temp_val[2] = {do_dft ? data[k + i * M]         : temp[i + k * M],
+                                                         do_dft ? data[k + (p/2) + i * M] : temp[i + (k + p/2) * M]};
+                        temp_reduce[k] = 
+                            float32x2_t{temp_val[0][0] * coef[0][0] + temp_val[0][1] * coef[0][1],
+                             temp_val[0][0] * coef[0][2] + temp_val[0][1] * coef[0][3]} + 
+                            float32x2_t{temp_val[1][0] * coef[1][0] + temp_val[1][1] * coef[1][1],
+                             temp_val[1][0] * coef[1][2] + temp_val[1][1] * coef[1][3]};
                     }
-                    data[i + (j * M)] = temp_ans;
+
+                    // Add the last item if needed
+                    if constexpr (p % 2 == 1) {
+                        const auto coef = coefs[i * p * p + j * p + (p-1)];
+                        const auto temp_val = do_dft ? data[(p-1) + i * M] : temp[i + (p-1) * M];
+                        temp_reduce[p/2 - 1] += 
+                            float32x2_t{temp_val[0] * coef[0] + temp_val[1] * coef[1],
+                             temp_val[0] * coef[2] + temp_val[1] * coef[3]};
+                    }
+
+                    // Finish Tree Reduce
+                    #pragma clang loop unroll_count(16)
+                    for (unsigned int k = p/2; k > 1 ; k /= 2) {
+
+                        // Make sure to add the last item if have an odd number of elements
+                        if (k % 2 == 1) {
+                            temp_reduce[0] += temp_reduce[k - 1];
+                        }
+
+                        // Do Tree reduction step
+                        #pragma clang loop unroll_count(32)
+                        for (unsigned int l = 0; l < k/2; l++) {
+                            temp_reduce[l] += temp_reduce[l + k/2];
+                        }
+                    }
+
+                    // Store Answer
+                    temp_ans[j] = temp_reduce[0];
+                    MCA_END
                 }
+
+                for (unsigned int j = 0; j < p; j++)
+                    data[i + (j * M)] = temp_ans[j];
             }
 
             // This function is in-place! the input is modified with the result.
@@ -209,17 +254,15 @@ namespace FFT {
             const double angle = NegTwoPI * static_cast<double>(i * (k + j * M)) / static_cast<double>(N);
             return {static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
         };
-        static float32x2_t* gen_coefs_by_angle() {
-            static float32x2_t* coefs = []{
-                float32x2_t* result = new float32x2_t[N * p * 2];
+        static float32x4_t* gen_coefs_by_angle() {
+            static float32x4_t* coefs = []{
+                float32x4_t* result = new float32x4_t[N * p];
             
                 for (std::size_t i = 0; i < M; i++) {
                     for (std::size_t j = 0; j < p; j++) {
                         for (std::size_t k = 0; k < p; k++) {
-                            const auto index = i * p * p + j * p + k;
                             const auto temp = gen_factor_by_angle(k, j, i);
-                            result[2 * index] = {temp[0], -(temp[1])};
-                            result[(2 * index) + 1] = {temp[1], temp[0]};
+                            result[i * p * p + j * p + k] = {temp[0], -(temp[1]), temp[1], temp[0]};
                         }
                     }
                 }

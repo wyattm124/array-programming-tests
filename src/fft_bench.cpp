@@ -2,42 +2,77 @@
 #include <fftw3.h>
 #include <benchmark/benchmark.h>
 
-// Define another benchmark
-static void BM_Basic_Powerof2FFT(benchmark::State& state) {
-    std::array<std::complex<float>, 8192> time_domain1 = {0};
-    std::array<std::complex<float>, 8192> freq_domain1 = {0};
-    FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), 8192);
+
+class Powerof2Fixture : public benchmark::Fixture {
+protected:
+    constexpr static size_t N = 8192;
+    std::array<std::complex<float>, N> time_domain1;
+    std::array<std::complex<float>, N> freq_domain1;
+    
+    void SetUp(const benchmark::State& state) {
+        time_domain1.fill(0);
+        freq_domain1.fill(0);
+        FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
+    }
+};
+
+class MersennePrimeFixture : public benchmark::Fixture {
+protected:
+    constexpr static size_t N = 8191;
+    std::array<std::complex<float>, N> time_domain1;
+    std::array<std::complex<float>, N> freq_domain1;
+        
+    void SetUp(const benchmark::State& state) {
+        time_domain1.fill(0);
+        freq_domain1.fill(0);
+        FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
+    }
+};
+
+class SmallPrimeFixture : public benchmark::Fixture {
+protected:
+    constexpr static size_t N = 17;
+    std::array<std::complex<float>, N> time_domain1;
+    std::array<std::complex<float>, N> freq_domain1;
+        
+    void SetUp(const benchmark::State& state) {
+        time_domain1.fill(0);
+        freq_domain1.fill(0);
+        FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
+    }
+};
+
+// Power of 2 benchmarks
+BENCHMARK_DEFINE_F(Powerof2Fixture, Basic)(benchmark::State& state) {
     for (auto _ : state) {
-        FFT::FFTPlanBasic<8192>::fft(time_domain1.data());
+        FFT::FFTPlanBasic<Powerof2Fixture::N>::fft(time_domain1.data());
     }
 }
 
-// Define another benchmark
-static void BM_Neon_Powerof2FFT(benchmark::State& state) {
-    constexpr size_t N = 8192;
-    std::array<float32x2_t, N> time_domain1 = {0};
-    std::array<float32x2_t, N> freq_domain1 = {0};
-    FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
+BENCHMARK_DEFINE_F(Powerof2Fixture, Neon)(benchmark::State& state) {
+    // Need to Copy Data to Correct Type
+    std::array<float32x2_t, Powerof2Fixture::N> temp_time_domain1 = {0};
+    std::array<float32x2_t, Powerof2Fixture::N> temp_freq_domain1 = {0};
+    for (unsigned int i = 0; i < Powerof2Fixture::N; i++) {
+        temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
+        temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
+    }
 
-    // Make sure coeffs are calculated ahead of time
-    volatile auto fft_plan_n = FFT::FFTPlan<N>();
+    // Make sure to do initialization
+    volatile auto fft_plan_n = FFT::FFTPlan<Powerof2Fixture::N>();
+
     for (auto _ : state) {
-        FFT::FFTPlan<N>::fft(time_domain1.data());
+        FFT::FFTPlan<Powerof2Fixture::N>::fft(temp_time_domain1.data());
     }
 }
 
-static void BM_FFTW_Powerof2FFT(benchmark::State& state) {
-    // Generate Waves
-    std::array<std::complex<float>, 8192> time_domain1 = {0};
-    std::array<std::complex<float>, 8192> freq_domain1 = {0};
-    FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), 8192);
-
+BENCHMARK_DEFINE_F(Powerof2Fixture, FFTW)(benchmark::State& state) {
     // Configure input with waves
     fftwf_complex *in, *out;
     fftwf_plan p;
-    in = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * 8192);
-    out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * 8192);
-    for (std::size_t i = 0; i < 8192; i++) {
+    in = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * Powerof2Fixture::N);
+    out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * Powerof2Fixture::N);
+    for (std::size_t i = 0; i < Powerof2Fixture::N; i++) {
         in[i][0] = time_domain1[i].real();
         in[i][1] = time_domain1[i].imag();
         out[i][0] = 0;
@@ -45,7 +80,7 @@ static void BM_FFTW_Powerof2FFT(benchmark::State& state) {
     }
 
     // Set the plan
-    p = fftwf_plan_dft_1d(8192, in, out, FFTW_FORWARD, FFTW_MEASURE);
+    p = fftwf_plan_dft_1d(Powerof2Fixture::N, in, out, FFTW_FORWARD, FFTW_MEASURE);
 
     // Benchmark
     for (auto _ : state) {
@@ -58,40 +93,37 @@ static void BM_FFTW_Powerof2FFT(benchmark::State& state) {
     fftwf_free(out);
 }
 
-static void BM_Basic_MersennePrimeFFT(benchmark::State& state) {
-    std::array<std::complex<float>, 8191> time_domain1 = {0};
-    std::array<std::complex<float>, 8191> freq_domain1 = {0};
-    FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), 8191);
+// Mersenne Prime benchmarks
+BENCHMARK_DEFINE_F(MersennePrimeFixture, Basic)(benchmark::State& state) {
     for (auto _ : state) {
-        FFT::FFTPlanBasic<8191>::fft(time_domain1.data());
+        FFT::FFTPlanBasic<MersennePrimeFixture::N>::fft(time_domain1.data());
     }
 }
 
-static void BM_Neon_MersennePrimeFFT(benchmark::State& state) {
-    constexpr size_t N = 8191;
-    std::array<float32x2_t, N> time_domain1 = {0};
-    std::array<float32x2_t, N> freq_domain1 = {0};
-    FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
+BENCHMARK_DEFINE_F(MersennePrimeFixture, Neon)(benchmark::State& state) {
+    // Need to Copy Data to Correct Type
+    std::array<float32x2_t, MersennePrimeFixture::N> temp_time_domain1 = {0};
+    std::array<float32x2_t, MersennePrimeFixture::N> temp_freq_domain1 = {0};
+    for (unsigned int i = 0; i < MersennePrimeFixture::N; i++) {
+        temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
+        temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
+    }
 
-    // Make sure coeffs are calculated ahead of time
-    volatile auto fft_plan_n = FFT::FFTPlan<N>();
+    // Make sure to do initialization
+    volatile auto fft_plan_n = FFT::FFTPlan<MersennePrimeFixture::N>();
+
     for (auto _ : state) {
-        FFT::FFTPlan<N>::fft(time_domain1.data());
+        FFT::FFTPlan<MersennePrimeFixture::N>::fft(temp_time_domain1.data());
     }
 }
 
-static void BM_FFTW_MersennePrimeFFT(benchmark::State& state) {
-    // Generate Waves
-    std::array<std::complex<float>, 8191> time_domain1 = {0};
-    std::array<std::complex<float>, 8191> freq_domain1 = {0};
-    FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), 8191);
-
+BENCHMARK_DEFINE_F(MersennePrimeFixture, FFTW)(benchmark::State& state) {
     // Configure input with waves
     fftwf_complex *in, *out;
     fftwf_plan p;
-    in = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * 8191);
-    out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * 8191);
-    for (std::size_t i = 0; i < 8191; i++) {
+    in = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * MersennePrimeFixture::N);
+    out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * MersennePrimeFixture::N);
+    for (std::size_t i = 0; i < MersennePrimeFixture::N; i++) {
         in[i][0] = time_domain1[i].real();
         in[i][1] = time_domain1[i].imag();
         out[i][0] = 0;
@@ -99,7 +131,7 @@ static void BM_FFTW_MersennePrimeFFT(benchmark::State& state) {
     }
 
     // Set the plan
-    p = fftwf_plan_dft_1d(8191, in, out, FFTW_FORWARD, FFTW_MEASURE);
+    p = fftwf_plan_dft_1d(MersennePrimeFixture::N, in, out, FFTW_FORWARD, FFTW_MEASURE);
 
     // Benchmark
     for (auto _ : state) {
@@ -112,42 +144,37 @@ static void BM_FFTW_MersennePrimeFFT(benchmark::State& state) {
     fftwf_free(out);
 }
 
-static void BM_Basic_SmallPrimeFFT(benchmark::State& state) {
-    constexpr size_t N = 17;
-    std::array<std::complex<float>, N> time_domain1 = {0};
-    std::array<std::complex<float>, N> freq_domain1 = {0};
-    FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
+// Small Prime benchmarks
+BENCHMARK_DEFINE_F(SmallPrimeFixture, Basic)(benchmark::State& state) {
     for (auto _ : state) {
-        FFT::FFTPlanBasic<N>::fft(time_domain1.data());
+        FFT::FFTPlanBasic<SmallPrimeFixture::N>::fft(time_domain1.data());
     }
 }
 
-static void BM_Neon_SmallPrimeFFT(benchmark::State& state) {
-    constexpr size_t N = 17;
-    std::array<float32x2_t, N> time_domain1 = {0};
-    std::array<float32x2_t, N> freq_domain1 = {0};
-    FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
+BENCHMARK_DEFINE_F(SmallPrimeFixture, Neon)(benchmark::State& state) {
+    // Need to Copy Data to Correct Type
+    std::array<float32x2_t, SmallPrimeFixture::N> temp_time_domain1 = {0};
+    std::array<float32x2_t, SmallPrimeFixture::N> temp_freq_domain1 = {0};
+    for (unsigned int i = 0; i < SmallPrimeFixture::N; i++) {
+        temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
+        temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
+    }
 
-    // Make sure coeffs are calculated ahead of time
-    volatile auto fft_plan_n = FFT::FFTPlan<N>();
+    // Make sure to do initialization
+    volatile auto fft_plan_n = FFT::FFTPlan<SmallPrimeFixture::N>();
+
     for (auto _ : state) {
-        FFT::FFTPlan<N>::fft(time_domain1.data());
+        FFT::FFTPlan<SmallPrimeFixture::N>::fft(temp_time_domain1.data());
     }
 }
 
-static void BM_FFTW_SmallPrimeFFT(benchmark::State& state) {
-    constexpr size_t N = 17;
-    // Generate Waves
-    std::array<std::complex<float>, N> time_domain1 = {0};
-    std::array<std::complex<float>, N> freq_domain1 = {0};
-    FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
-
+BENCHMARK_DEFINE_F(SmallPrimeFixture, FFTW)(benchmark::State& state) {
     // Configure input with waves
     fftwf_complex *in, *out;
     fftwf_plan p;
-    in = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
-    out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
-    for (std::size_t i = 0; i < N; i++) {
+    in = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * SmallPrimeFixture::N);
+    out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * SmallPrimeFixture::N);
+    for (std::size_t i = 0; i < SmallPrimeFixture::N; i++) {
         in[i][0] = time_domain1[i].real();
         in[i][1] = time_domain1[i].imag();
         out[i][0] = 0;
@@ -155,7 +182,7 @@ static void BM_FFTW_SmallPrimeFFT(benchmark::State& state) {
     }
 
     // Set the plan
-    p = fftwf_plan_dft_1d(N, in, out, FFTW_FORWARD, FFTW_MEASURE);
+    p = fftwf_plan_dft_1d(SmallPrimeFixture::N, in, out, FFTW_FORWARD, FFTW_MEASURE);
 
     // Benchmark
     for (auto _ : state) {
@@ -168,16 +195,20 @@ static void BM_FFTW_SmallPrimeFFT(benchmark::State& state) {
     fftwf_free(out);
 }
 
-// Add all Benchmarks
-BENCHMARK(BM_Basic_Powerof2FFT);
-BENCHMARK(BM_Neon_Powerof2FFT);
-BENCHMARK(BM_FFTW_Powerof2FFT);
-BENCHMARK(BM_Basic_MersennePrimeFFT);
-BENCHMARK(BM_Neon_MersennePrimeFFT);
-BENCHMARK(BM_FFTW_MersennePrimeFFT);
-BENCHMARK(BM_Basic_SmallPrimeFFT);
-BENCHMARK(BM_Neon_SmallPrimeFFT);
-BENCHMARK(BM_FFTW_SmallPrimeFFT);
+// Power of 2 Benchmarks
+BENCHMARK_REGISTER_F(Powerof2Fixture, Basic);
+BENCHMARK_REGISTER_F(Powerof2Fixture, Neon);
+BENCHMARK_REGISTER_F(Powerof2Fixture, FFTW);
+
+// Mersenne Prime Benchmarks
+BENCHMARK_REGISTER_F(MersennePrimeFixture, Basic);
+BENCHMARK_REGISTER_F(MersennePrimeFixture, Neon);
+BENCHMARK_REGISTER_F(MersennePrimeFixture, FFTW);
+
+// Small Prime Benchmarks
+BENCHMARK_REGISTER_F(SmallPrimeFixture, Basic);
+BENCHMARK_REGISTER_F(SmallPrimeFixture, Neon);
+BENCHMARK_REGISTER_F(SmallPrimeFixture, FFTW);
 
 // Template out main
 BENCHMARK_MAIN();

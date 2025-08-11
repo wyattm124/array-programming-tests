@@ -41,7 +41,7 @@ TEST_CASE("Prime Factorization") {
     CHECK(prime_factor::prime_factorization(13 * 17 * 19) == std::array<size_t, 64>{13, 17, 19});
 }
 
-TEST_CASE("FFT Radix Transposition Opt Inplace") {
+TEST_CASE("FFT Radix Transposition Inplace") {
     // Test Inputs
     std::array<float32x2_t, 8> in1 = {{{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}}};
     std::array<float32x2_t, 9> in2 = {{{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}, {8, 0}}};
@@ -51,8 +51,8 @@ TEST_CASE("FFT Radix Transposition Opt Inplace") {
     std::array<float32x2_t, 9> answer2 = {{{0, 0}, {3, 0}, {6, 0}, {1, 0}, {4, 0}, {7, 0}, {2, 0}, {5, 0}, {8, 0}}};
     
     // modify in place
-    FFT::FFTPlan<8>::prime_factor_binner_inplace(in1.data());
-    FFT::FFTPlan<9>::prime_factor_binner_inplace(in2.data());
+    FFT::DFT_binner_inplace<2, 4>(in1.data());
+    FFT::DFT_binner_inplace<3, 3>(in2.data());
     
     // Check Outputs
     bool cmp = true;
@@ -68,7 +68,7 @@ TEST_CASE("FFT Radix Transposition Opt Inplace") {
     CHECK(cmp);
 }
 
-TEST_CASE("FFT Radix Transposition Opt Extra Memory") {
+TEST_CASE("FFT Radix Transposition Extra Memory") {
     // Test Inputs
     std::array<float32x2_t, 8> data1 = {{{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}}};
     std::array<float32x2_t, 9> data2 = {{{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}, {8, 0}}};
@@ -80,8 +80,8 @@ TEST_CASE("FFT Radix Transposition Opt Extra Memory") {
     std::array<float32x2_t, 9> answer2 = {{{0, 0}, {3, 0}, {6, 0}, {1, 0}, {4, 0}, {7, 0}, {2, 0}, {5, 0}, {8, 0}}};
     
     // modify in place
-    FFT::FFTPlan<8>::prime_factor_binner(data1.data(), out1.data());
-    FFT::FFTPlan<9>::prime_factor_binner(data2.data(), out2.data());
+    FFT::DFT_binner<4, 2>(data1.data(), out1.data());
+    FFT::DFT_binner<3, 3>(data2.data(), out2.data());
     
     // Check Outputs
     bool cmp = true;
@@ -93,35 +93,6 @@ TEST_CASE("FFT Radix Transposition Opt Extra Memory") {
     cmp = true;
     for (std::size_t i = 0; i < 9; i++) {
         cmp &= (out2[i][0] == answer2[i][0] && out2[i][1] == answer2[i][1]);
-    }
-    CHECK(cmp);
-}
-
-TEST_CASE("FFT Radix Transposition Basic") {
-    // Test Inputs
-    std::array<std::complex<float>, 8> data1 = {{0, 1, 2, 3, 4, 5, 6, 7}};
-    std::array<std::complex<float>, 9> data2 = {{0, 1, 2, 3, 4, 5, 6, 7, 8}};
-    std::array<std::complex<float>, 8> out1;
-    std::array<std::complex<float>, 9> out2;
-
-    // Test Answers
-    std::array<std::complex<float>, 8> answer1 = {{0, 2, 4, 6, 1, 3, 5, 7}};
-    std::array<std::complex<float>, 9> answer2 = {{0, 3, 6, 1, 4, 7, 2, 5, 8}};
-    
-    // modify in place
-    FFT::FFTPlanBasic<8>::prime_factor_binner(data1.data(), out1.data());
-    FFT::FFTPlanBasic<9>::prime_factor_binner(data2.data(), out2.data());
-    
-    // Check Outputs
-    bool cmp = true;
-    for (std::size_t i = 0; i < 8; i++) {
-        cmp &= (out1[i] == answer1[i]);
-    }
-    CHECK(cmp);
-    
-    cmp = true;
-    for (std::size_t i = 0; i < 9; i++) {
-        cmp &= (out2[i] == answer2[i]);
     }
     CHECK(cmp);
 }

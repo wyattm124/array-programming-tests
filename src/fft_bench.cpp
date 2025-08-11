@@ -195,6 +195,26 @@ BENCHMARK_DEFINE_F(SmallPrimeFixture, FFTW)(benchmark::State& state) {
     fftwf_free(out);
 }
 
+BENCHMARK_DEFINE_F(SmallPrimeFixture, Raders)(benchmark::State& state) {
+    std::array<float32x2_t, 11> in;
+    std::array<float32x2_t, 11> out = {0};
+    for (unsigned int i = 0; i < 11; i++) {
+        in[i] = {time_domain1[i].real(), time_domain1[i].imag()};
+    }
+    float32x2_t raders_coefs[7] = {
+        {1.0f, 0.0f},
+        {std::cosf((FFT::NegTwoPI / 7)), std::sinf((FFT::NegTwoPI / 7))},
+        {std::cosf((2 * FFT::NegTwoPI / 7)), std::sinf((2 * FFT::NegTwoPI / 7))},
+        {std::cosf((3 * FFT::NegTwoPI / 7)), std::sinf((3 * FFT::NegTwoPI / 7))},
+        {std::cosf((4 * FFT::NegTwoPI / 7)), std::sinf((4 * FFT::NegTwoPI / 7))},
+        {std::cosf((5 * FFT::NegTwoPI / 7)), std::sinf((5 * FFT::NegTwoPI / 7))},
+        {std::cosf((6 * FFT::NegTwoPI / 7)), std::sinf((6 * FFT::NegTwoPI / 7))},
+    };
+    for (auto _ : state) {
+        FFT::raders_7(in.data(), out.data(), raders_coefs);
+    }
+}
+
 // Power of 2 Benchmarks
 BENCHMARK_REGISTER_F(Powerof2Fixture, Basic);
 BENCHMARK_REGISTER_F(Powerof2Fixture, Neon);
@@ -209,6 +229,7 @@ BENCHMARK_REGISTER_F(MersennePrimeFixture, FFTW);
 BENCHMARK_REGISTER_F(SmallPrimeFixture, Basic);
 BENCHMARK_REGISTER_F(SmallPrimeFixture, Neon);
 BENCHMARK_REGISTER_F(SmallPrimeFixture, FFTW);
+BENCHMARK_REGISTER_F(SmallPrimeFixture, Raders);
 
 // Template out main
 BENCHMARK_MAIN();

@@ -1,6 +1,6 @@
 #include <cstddef>
 #include <iostream>
-#include "prime_factor.hpp"
+#include "../src/prime_factor.hpp"
 
 namespace prime_factor {
     template <std::size_t N>

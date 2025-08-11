@@ -6,6 +6,14 @@
 #include "prime_factor.hpp"
 #include <iostream>
 
+/// TODO: 
+/// (1) - Raders DFT implementations for 3 - 7
+/// (2) - specialized DFT implementations for 2, 4, 6, 8
+/// (3) - implement these as base cases in FFTPlan
+/// (4) - implemnt them for recursive steps in FFT plan
+/// (5) - implement Bluestiens's for numbers that do not decompse into these factors
+/// (6) - implement a top level search for best number to pad an input to for FFT
+
 // For LLVM MCA Analysis
 #define MCA_START __asm volatile("# LLVM-MCA-BEGIN");
 #define MCA_END __asm volatile("# LLVM-MCA-END");
@@ -23,7 +31,20 @@ namespace FFT {
     }
     
     constexpr double TwoPI = 2.0 * M_PI;
-    constexpr double NegTwoPI = -TwoPI; 
+    constexpr double NegTwoPI = -TwoPI;
+    
+    // TODO: Only for circular convolution test! everything 7 seems to all be able to
+    //  happen in registers and is sub ns fast!
+    void raders_7(float32x2_t *__restrict__ in, float32x2_t *__restrict__ out, float32x2_t *__restrict__ coeff) {
+        MCA_START
+        //#pragma clang loop unroll_count(7)
+        for (unsigned int i = 0; i < 7; i++)
+            //#pragma clang loop unroll_count(7)
+            for (unsigned int j = 0; j < 7; j++)
+                out[i] += neon_mul(in[j], coeff[(j + i) % 7]);
+        MCA_END
+        return;   
+    }
 
     template <std::size_t N>
     class FFTPlan {
@@ -68,32 +89,53 @@ namespace FFT {
             // Base case
             if constexpr (p < 2) {
                 return;
+            } else if constexpr (N == 2) {
+                const float32x2_t a = data[0] + data[1];
+                data[1] = data[0] - data[1];
+                data[0] = a;
+                return;
             }
 
-            // Transpose Input Data around the radix
             std::array<float32x2_t, N> temp;
-            prime_factor_binner(data, temp.data());
+            if constexpr (M == 1) {
+                for (std::size_t i = 0; i < p; i++)
+                    temp[i] = data[i];
+            } else {
+                // Transpose Input Data around the radix
+                prime_factor_binner(data, temp.data());
 
-            // Recursively apply fft to each bin
-            for (std::size_t i = 0; i < p; i++)
-                FFTPlan<M>::fft_recurse(temp.data() + (i * M));
+                // Recursively apply fft to each bin
+                for (std::size_t i = 0; i < p; i++)
+                    FFTPlan<M>::fft_recurse(temp.data() + (i * M));
+            }
 
             // Do tensor multiplication of coeffs with data
             float32x2_t* coefs = gen_coefs_by_angle();
             for (std::size_t i = 0; i < M; i++) {
+                #pragma clang loop unroll_count(32)
                 for (std::size_t j = 0; j < p; j++) {
+                    //MCA_START
                     float32x2_t temp_ans = {0, 0};
+                    auto index = i * p * p + j * p;
+                    #pragma clang loop unroll_count(32)
                     for (std::size_t k = 0; k < p; k++) {
-                        MCA_START
-                        const auto index = i * p * p + j * p + k;
-                        const auto real_coeff = coefs[2 * index];
-                        const auto imag_coeff = coefs[(2 * index) + 1];
-                        const auto temp_val = temp[i + (k * M)];
-                        temp_ans[0] += temp_val[0] * real_coeff[0] + temp_val[1] * real_coeff[1];
-                        temp_ans[1] += temp_val[0] * imag_coeff[0] + temp_val[1] * imag_coeff[1];
-                        MCA_END
+                        const auto coeff = coefs[index + k];
+                        if constexpr (M == 1) {
+                            const auto temp_val = temp[k];
+                            temp_ans += neon_mul(temp_val, coeff);
+                        } else {
+                            const auto temp_val = temp[i + (k * M)];
+                            temp_ans += neon_mul(temp_val, coeff);
+                        }
                     }
-                    data[i + (j * M)] = temp_ans;
+
+                    // Store the answer
+                    if constexpr (M == 1) {
+                        data[j] = temp_ans;
+                    } else {
+                        data[i + (j * M)] = temp_ans;
+                    }
+                    //MCA_END
                 }
             }
 
@@ -211,15 +253,13 @@ namespace FFT {
         };
         static float32x2_t* gen_coefs_by_angle() {
             static float32x2_t* coefs = []{
-                float32x2_t* result = new float32x2_t[N * p * 2];
+                float32x2_t* result = new float32x2_t[N * p];
             
                 for (std::size_t i = 0; i < M; i++) {
                     for (std::size_t j = 0; j < p; j++) {
                         for (std::size_t k = 0; k < p; k++) {
                             const auto index = i * p * p + j * p + k;
-                            const auto temp = gen_factor_by_angle(k, j, i);
-                            result[2 * index] = {temp[0], -(temp[1])};
-                            result[(2 * index) + 1] = {temp[1], temp[0]};
+                            result[index] = gen_factor_by_angle(k, j, i);
                         }
                     }
                 }

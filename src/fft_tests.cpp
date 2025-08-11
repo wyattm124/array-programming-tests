@@ -180,10 +180,8 @@ TEST_CASE("FFT Basic Small Input") {
     CHECK(max_diff < 5e-6);
 }
 
- TEST_CASE("FFT Opt Small Input") {
-    constexpr size_t N = 8;
-    constexpr size_t M = 9;
-
+template<unsigned int N>
+std::pair<float, float> fft_opt_tester() {
     // Test Inputs
     std::array<float32x2_t, N> time_domain1 = {0};
     std::array<float32x2_t, N> freq_domain1 = {0};
@@ -191,109 +189,65 @@ TEST_CASE("FFT Basic Small Input") {
     std::array<float32x2_t, N> time_domain1_copy;
     for (std::size_t i = 0; i < N; i++)
         time_domain1_copy[i] = time_domain1[i];
-
-    std::array<float32x2_t, M> time_domain2 = {0};
-    std::array<float32x2_t, M> freq_domain2 = {0};
-    FFT::wave_gen_lcg(time_domain2.data(), freq_domain2.data(), M);
-    std::array<float32x2_t, M> time_domain2_copy;
-    for (std::size_t i = 0; i < M; i++)
-        time_domain2_copy[i] = time_domain2[i]; 
-
+    
     // Init
-    volatile auto fft_plan_8 = FFT::FFTPlan<N>();
-    volatile auto fft_plan_9 = FFT::FFTPlan<M>();
-
+    volatile auto fft_plan = FFT::FFTPlan<N>();
+    
     // modify in place to frequency domain
     FFT::FFTPlan<N>::fft(time_domain1.data());
-    FFT::FFTPlan<M>::fft(time_domain2.data());
 
     // Check Outputs
     float max_diff = 0;
     for (std::size_t i = 0; i < N; i++) {
         max_diff = std::max(max_diff, FFT::neon_abs(time_domain1[i] - freq_domain1[i]));
     }
-    CHECK(max_diff < 2e-5);
-    
-    max_diff = 0;
-    for (std::size_t i = 0; i < M; i++) {
-        max_diff = std::max(max_diff, FFT::neon_abs(time_domain2[i] - freq_domain2[i]));
-    }
-    CHECK(max_diff < 7e-6);
 
     // modify in place back to time domain
     FFT::FFTPlan<N>::ifft(time_domain1.data());
-    FFT::FFTPlan<M>::ifft(time_domain2.data());
     
     // Check Outputs
-    max_diff = 0;
+    float max_inverse_diff = 0;
     for (std::size_t i = 0; i < N; i++) {
-        max_diff = std::max(max_diff, FFT::neon_abs(time_domain1[i] - time_domain1_copy[i]));
+        max_inverse_diff = std::max(max_inverse_diff, FFT::neon_abs(time_domain1[i] - time_domain1_copy[i]));
     }
-    CHECK(max_diff < 3e-6);
+    return {max_diff, max_inverse_diff};
+}
+TEST_CASE("FFT Opt Small Input") {
+    auto Ans_8 = fft_opt_tester<8>();
     
-    max_diff = 0;
-    for (std::size_t i = 0; i < M; i++) {
-        max_diff = std::max(max_diff, FFT::neon_abs(time_domain2[i] - time_domain2_copy[i]));
-    }
-    CHECK(max_diff < 1e-6);
+    CHECK(Ans_8.first < 2e-5);
+    CHECK(Ans_8.second < 3e-6);
+    
+    auto Ans_9 = fft_opt_tester<9>();
+    
+    CHECK(Ans_9.first < 7e-6);
+    CHECK(Ans_9.second < 1e-6); 
 }
 
 TEST_CASE("FFT Opt Med Input") {
-    constexpr size_t N = 7;
-    constexpr size_t M = 13;
 
-    // Test Inputs
-    std::array<float32x2_t, N> time_domain1 = {0};
-    std::array<float32x2_t, N> freq_domain1 = {0};
-    FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
-    std::array<float32x2_t, N> time_domain1_copy;
-    for (std::size_t i = 0; i < N; i++)
-        time_domain1_copy[i] = time_domain1[i];
-
-    std::array<float32x2_t, M> time_domain2 = {0};
-    std::array<float32x2_t, M> freq_domain2 = {0};
-    FFT::wave_gen_lcg(time_domain2.data(), freq_domain2.data(), M);
-    std::array<float32x2_t, M> time_domain2_copy;
-    for (std::size_t i = 0; i < M; i++)
-        time_domain2_copy[i] = time_domain2[i]; 
-
-    // Init
-    volatile auto fft_plan_n = FFT::FFTPlan<N>();
-    volatile auto fft_plan_m = FFT::FFTPlan<M>();
-
-    // modify in place to frequency domain
-    FFT::FFTPlan<N>::fft(time_domain1.data());
-    FFT::FFTPlan<M>::fft(time_domain2.data());
-
-    // Check Outputs
-    float max_error = 0;
-    for (std::size_t i = 0; i < N; i++) {
-        max_error = std::max(max_error, FFT::neon_abs(time_domain1[i] - freq_domain1[i]));
-    }
-    CHECK(max_error < 8e-6);
+    auto Ans_7 = fft_opt_tester<7>();
     
-    max_error = 0;
-    for (std::size_t i = 0; i < M; i++) {
-        max_error = std::max(max_error, FFT::neon_abs(time_domain2[i] - freq_domain2[i]));
-    }
-    CHECK(max_error < 8e-6);
+    CHECK(Ans_7.first < 8e-6);
+    CHECK(Ans_7.second < 3e-6);
+    
+    auto Ans_13 = fft_opt_tester<13>();
+    
+    CHECK(Ans_13.first < 8e-6);
+    CHECK(Ans_13.second < 2e-6); 
+}
 
-    // modify in place back to time domain
-    FFT::FFTPlan<N>::ifft(time_domain1.data());
-    FFT::FFTPlan<M>::ifft(time_domain2.data());
+TEST_CASE("FFT Opt Small Prime Composite Input") {
+
+    auto Ans_1 = fft_opt_tester<7 * 7 * 13>();
     
-    // Check Outputs
-    max_error = 0;
-    for (std::size_t i = 0; i < N; i++) {
-        max_error = std::max(max_error, FFT::neon_abs(time_domain1[i] - time_domain1_copy[i]));
-    }
-    CHECK(max_error < 3e-6);
+    CHECK(Ans_1.first < 2e-3);
+    CHECK(Ans_1.second < 6e-4);
     
-    max_error = 0;
-    for (std::size_t i = 0; i < M; i++) {
-        max_error = std::max(max_error, FFT::neon_abs(time_domain2[i] - time_domain2_copy[i]));
-    }
-    CHECK(max_error < 2e-6);
+    auto Ans_2 = fft_opt_tester<5 * 7 * 11 * 13>();
+    
+    CHECK(Ans_2.first < 2e-3);
+    CHECK(Ans_2.second < 6e-4); 
 }
 
 // TODO : Opt tests with larger numbers like 8192 and 8191?

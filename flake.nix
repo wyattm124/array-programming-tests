@@ -34,14 +34,11 @@
           "-DBENCHMARK_ENABLE_TESTING=OFF"
         ];
       };
-    in {
+    in rec {
       devShells.default = pkgs.mkShell {
         buildInputs = [
           pkgs.clang
-          pkgs.cmake
-          pkgs.gnumake
           pkgs.git
-          pkgs.ninja
           doctest
           googlebench
           pkgs.libcxx
@@ -55,32 +52,21 @@
         shellHook = ''
           export CC=clang
           export CXX=clang++
-          build () {
+          build_fft () {
             clang++ -std=c++23 -O3 fft_tests.cpp -o ../bin/fft_tests && \
             clang++ -std=c++23 -O3 fft_bench.cpp -lbenchmark -pthread -lfftw3f -o ../bin/fft_bench && \
-            clang++ -std=c++23 -O3 fft_profile.cpp -lprofiler -o ../bin/fft_profile && \
-            clang++ -std=c++23 -O3 cheb_tests.cpp -o ../bin/cheb_tests && \
-            clang++ -std=c++23 -O3 prime_factor.cpp -o ../bin/prime_factor
+            clang++ -std=c++23 -O3 fft_profile.cpp -lprofiler -o ../bin/fft_profile
           }
           mca_timeline () {
             clang++ fft_profile.cpp -O2 -S -o - | llvm-mca -skip-unsupported-instructions=lack-sched --timeline
           }
+          build_tools () {
+            clang++ -std=c++23 -O3 cheb_tests.cpp -o ../bin/cheb_tests && \
+            clang++ -std=c++23 -O3 smooth_dist.cpp -o ../bin/smooth_dist
+          }
         '';
       };
 
-      packages.default = pkgs.mkShell {
-        buildInputs = [
-          pkgs.clang
-          pkgs.cmake
-          doctest
-          googlebench
-          pkgs.libcxx
-          pkgs.fftwFloat
-          pkgs.gperftools
-          pkgs.graphviz
-          pkgs.gv
-          pkgs.llvmPackages_latest.llvm
-        ];
-      };
+      packages.default = devShells.default; 
     });
 }

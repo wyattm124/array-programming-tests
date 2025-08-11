@@ -51,7 +51,7 @@ TEST_CASE("FFT Radix Transposition Inplace") {
     std::array<float32x2_t, 9> answer2 = {{{0, 0}, {3, 0}, {6, 0}, {1, 0}, {4, 0}, {7, 0}, {2, 0}, {5, 0}, {8, 0}}};
     
     // modify in place
-    FFT::DFT_binner_inplace<2, 4>(in1.data());
+    FFT::DFT_binner_inplace<4, 2>(in1.data());
     FFT::DFT_binner_inplace<3, 3>(in2.data());
     
     // Check Outputs

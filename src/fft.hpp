@@ -64,9 +64,9 @@ namespace FFT {
 
         // Given an index n, return the index it should be moved to
         constexpr auto get_next_index = [=](std::size_t n) -> std::size_t {
-            const auto i = n % A;
-            const auto j = n / A;
-            return i * B + j;
+            const auto i = n % B;
+            const auto j = n / B;
+            return i * A + j;
         };
 
         // Because of basic group theory, if N / p is not prime, we will

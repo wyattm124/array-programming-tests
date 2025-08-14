@@ -211,17 +211,21 @@ TEST_CASE("FFT Opt Med Input") {
 }
 
 TEST_CASE("FFT Opt Small Prime Composite Input") {
-    auto Ans_1 = fft_opt_tester<8>();//7 * 7 * 13>();
+    auto Ans_1 = fft_opt_tester<8>();
     CHECK(Ans_1.first < 2e-3);
     CHECK(Ans_1.second < 5e-3);
     
-    auto Ans_2 = fft_opt_tester<3 * 5>(); // 5 * 7 * 11 * 13>();
+    auto Ans_2 = fft_opt_tester<3 * 5>();
     CHECK(Ans_2.first < 3e-3);
     CHECK(Ans_2.second < 2e-2);
 
-    auto Ans_3 = fft_opt_tester<3 * 5 * 7>(); // 5 * 7 * 11 * 13>();
+    auto Ans_3 = fft_opt_tester<3 * 5 * 7>();
     CHECK(Ans_3.first < 4e-2);
     CHECK(Ans_3.second < 3e-1);
+
+    auto Ans_4 = fft_opt_tester<3 * 5 * 7 * 11 * 13>();
+    CHECK(Ans_4.first < 4e-2);
+    CHECK(Ans_4.second < 3e-1);
 }
 
 // TODO : Opt tests with larger numbers like 8192 and 8191?

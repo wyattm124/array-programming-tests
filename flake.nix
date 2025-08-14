@@ -49,13 +49,15 @@
           pkgs.llvmPackages_latest.llvm
         ];
 
+        # With -O3 the compiler optimizes out some recusrsive fft transposition steps
+        #  which is why I stick to -O2
         shellHook = ''
           export CC=clang
           export CXX=clang++
           build_fft () {
-            clang++ -std=c++23 -O3 fft_tests.cpp -o ../bin/fft_tests && \
-            clang++ -std=c++23 -O3 fft_bench.cpp -lbenchmark -pthread -lfftw3f -o ../bin/fft_bench && \
-            clang++ -std=c++23 -O3 fft_profile.cpp -lprofiler -o ../bin/fft_profile
+            clang++ -std=c++23 -O2 fft_tests.cpp -o ../bin/fft_tests && \
+            clang++ -std=c++23 -O2 fft_bench.cpp -lbenchmark -pthread -lfftw3f -o ../bin/fft_bench && \
+            clang++ -std=c++23 -O2 fft_profile.cpp -lprofiler -o ../bin/fft_profile
           }
           mca_timeline () {
             clang++ fft_profile.cpp -O2 -S -o - | llvm-mca -skip-unsupported-instructions=lack-sched --timeline

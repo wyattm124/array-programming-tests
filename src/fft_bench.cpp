@@ -31,7 +31,7 @@ protected:
 
 class SmallPrimeFixture : public benchmark::Fixture {
 protected:
-    constexpr static size_t N = 5;
+    constexpr static size_t N = 7;
     std::array<std::complex<float>, N> time_domain1;
     std::array<std::complex<float>, N> freq_domain1;
         

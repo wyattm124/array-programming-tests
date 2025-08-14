@@ -5,6 +5,7 @@
 #include <arm_neon.h>
 #include "prime_factor.hpp"
 #include <iostream>
+#include <iomanip>
 
 /// TODO: 
 /// (1) - specialized DFT implementations for 6, 7, 8 as base cases
@@ -223,18 +224,19 @@ namespace FFT {
 
                 // Multiply by Cooley Tukey Twiddle factors
                 auto twiddle_factors = gen_coefs_by_angle();
-                for (unsigned int i = A; i < N; i++) {
-                    temp_data[i] = neon_mul(temp_data[i], twiddle_factors[((i / A) * (i % A)) % N]);
+                for (unsigned int i = 0; i < N; i++) {
+                    data[i] = neon_mul(temp_data[i], twiddle_factors[((i / A) * (i % A)) % N]);
                 }
 
                 // Transpose around the second radix
-                DFT_binner<B, A>(temp_data.data(), data);
+                DFT_binner<B, A>(data, temp_data.data());
 
                 // Do the B sized FFT on each bin
                 for (unsigned int i = 0; i < A; i++)
-                    FFTPlan<B>::fft_recurse(data + (i * B));
+                    FFTPlan<B>::fft_recurse(temp_data.data() + (i * B));
 
-                DFT_binner_inplace<A, B>(data);
+                // TODO: In some cases the compiler seems to not do this step if given -O3
+                DFT_binner<A, B>(temp_data.data(), data);
             }
 
             // This function is in-place! the input is modified with the result.

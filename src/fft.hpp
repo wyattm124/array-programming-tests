@@ -208,6 +208,35 @@ namespace FFT {
                                neon_mul(root_1, x_3) + neon_mul_conj(root_2, x_4);
                 data[4] = x_0 + neon_mul(root_1, x_1) + neon_mul(root_2, x_2) +
                                neon_mul_conj(root_2, x_3) + neon_mul_conj(root_1, x_4);
+            } else if constexpr (N == 6) {
+                static constexpr float r_a = 0.5f;
+                static constexpr float r_b = 0.8660254f;
+                const float32x2_t x_0 = data[0];
+                const float32x2_t x_1 = data[1];
+                const float32x2_t x_2 = data[2];
+                const float32x2_t x_3 = data[3];
+                const float32x2_t x_4 = data[4];
+                const float32x2_t x_5 = data[5];
+                {
+                    const float32x2_t a = x_0 + x_2 + x_4;
+                    const float32x2_t b = x_1 + x_3 + x_5;
+                    data[0] = a + b;
+                    data[3] = a - b;
+                }
+                {
+                    const float32x2_t a = x_0 - x_3;
+                    const float32x2_t b = x_1 - x_4;
+                    const float32x2_t c = x_2 - x_5;
+                    data[1] = a + neon_mul(b, float32x2_t{r_a, r_b}) + neon_mul(c, float32x2_t{-r_a, r_b});
+                    data[5] = a + neon_mul(b, float32x2_t{r_a, -r_b}) + neon_mul(c, float32x2_t{-r_a, -r_b});
+                }
+                {
+                    const float32x2_t a = x_0 + x_3;
+                    const float32x2_t b = x_1 + x_4;
+                    const float32x2_t c = x_2 + x_5;
+                    data[2] = a + neon_mul(b, float32x2_t{-r_a, r_b}) + neon_mul(c, float32x2_t{-r_a, -r_b});
+                    data[4] = a + neon_mul(b, float32x2_t{-r_a, -r_b}) + neon_mul(c, float32x2_t{-r_a, r_b});
+                }
             } else if constexpr (N == 8) {
                 static constexpr float c = 0.70710678118f;
                 static constexpr float32x2_t eighth_root = {c,-c};

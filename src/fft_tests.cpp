@@ -211,6 +211,10 @@ TEST_CASE("FFT Opt Med Input") {
 }
 
 TEST_CASE("FFT Opt Small Prime Composite Input") {
+    auto Ans_0 = fft_opt_tester<6>();
+    CHECK(Ans_0.first < 2e-3);
+    CHECK(Ans_0.second < 5e-3);
+    
     auto Ans_1 = fft_opt_tester<8>();
     CHECK(Ans_1.first < 2e-3);
     CHECK(Ans_1.second < 5e-3);

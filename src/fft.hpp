@@ -18,6 +18,17 @@
 #define MCA_END __asm volatile("# LLVM-MCA-END");
 
 namespace FFT {
+    // These are the factors from highest priority to lowest priority, with
+    //  with the highest priority at the lowest index
+    constexpr unsigned int factors[] = {8, 4, 6};
+    constexpr unsigned int get_best_factor(unsigned int N) {
+        for (auto factor : factors) {
+            if (N % factor == 0)
+                return factor;
+        }
+        return prime_factor::get_prime_factor(N);
+    }
+
     // Neon intrinsics 
     inline float neon_abs(const float32x2_t &__restrict__ a) noexcept {
         return std::sqrt(a[0]*a[0] + a[1]*a[1]);
@@ -30,7 +41,7 @@ namespace FFT {
     }
     inline float32x2_t neon_mul_conj(const float32x2_t &__restrict__ a, const float32x2_t &__restrict__ b) noexcept {
         return {a[0] * b[0] + a[1] * b[1], a[0] * b[1] - a[1] * b[0]};
-    }
+    } 
 
     // For DFT Transpositions
     template <unsigned int A, unsigned int B, typename T>
@@ -109,8 +120,8 @@ namespace FFT {
     template <unsigned int N>
     class FFTPlan {
         public:
-        static constexpr unsigned int B = prime_factor::get_prime_factor(N);
-        static constexpr unsigned int A = N / B;
+        static constexpr unsigned int A = get_best_factor(N);
+        static constexpr unsigned int B = N / A;
 
         FFTPlan() {
             // Ensure the coeffs are calculated
@@ -197,6 +208,58 @@ namespace FFT {
                                neon_mul(root_1, x_3) + neon_mul_conj(root_2, x_4);
                 data[4] = x_0 + neon_mul(root_1, x_1) + neon_mul(root_2, x_2) +
                                neon_mul_conj(root_2, x_3) + neon_mul_conj(root_1, x_4);
+            } else if constexpr (N == 8) {
+                static constexpr float c = 0.70710678118f;
+                static constexpr float32x2_t eighth_root = {c,-c};
+                static constexpr auto forth_root = [](float32x2_t x){
+                    return float32x2_t{x[1], -x[0]};
+                };
+                const float32x2_t x_0 = data[0];
+                const float32x2_t x_1 = data[1];
+                const float32x2_t x_2 = data[2];
+                const float32x2_t x_3 = data[3];
+                const float32x2_t x_4 = data[4];
+                const float32x2_t x_5 = data[5];
+                const float32x2_t x_6 = data[6];
+                const float32x2_t x_7 = data[7];
+                {
+                    const float32x2_t a_0 = x_0 + x_4;
+                    const float32x2_t a_1 = x_2 + x_6;
+                    const float32x2_t b_0 = x_1 + x_5;
+                    const float32x2_t b_1 = x_3 + x_7;
+                    { // 0 and 4 index, based on 2 DFTs of size 4 + shifted for index 2 and 6
+                        const float32x2_t a = a_0 + a_1;
+                        const float32x2_t b = b_0 + b_1;
+                        data[0] = a + b;
+                        data[4] = a - b;
+                    }
+                    { // 2 and 6 index, based on 2 DFTs of size 4 + shifted for index 0 and 4
+                        const float32x2_t a = a_0 - a_1;
+                        const float32x2_t b_p = b_0 - b_1;
+                        const float32x2_t b = forth_root(b_p);
+                        data[2] = a + b;
+                        data[6] = a - b;
+                    }
+                }
+                {
+                    const float32x2_t a_0 = x_0 - x_4;
+                    const float32x2_t a_1_p = x_2 - x_6;
+                    const float32x2_t a_1 = forth_root(a_1_p);
+                    { // index 3 and 5
+                        const float32x2_t b_0_p = x_1 - x_5;
+                        const float32x2_t b_0 = forth_root(b_0_p);
+                        const float32x2_t b_1 = x_3 - x_7;
+                        data[3] = (a_0 - a_1) + neon_mul(eighth_root, b_1 + b_0);
+                        data[5] = (a_0 + a_1) + neon_mul_conj(eighth_root, b_1 - b_0);
+                    }
+                    { // DFT for index 1 and 7
+                        const float32x2_t b_0 = x_1 - x_5;
+                        const float32x2_t b_1_p = x_3 - x_7;
+                        const float32x2_t b_1 = forth_root(b_1_p);
+                        data[1] = (a_0 + a_1) + neon_mul(eighth_root, b_0 + b_1);
+                        data[7] = (a_0 - a_1) + neon_mul_conj(eighth_root, b_0 - b_1); 
+                    }
+                }
             } else if constexpr (A == 1 || B == 1) { // Do the full DFT
                 auto dft_matrix = gen_coefs_by_angle();
                 std::array<float32x2_t, N> temp_data;

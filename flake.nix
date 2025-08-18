@@ -55,16 +55,17 @@
           export CC=clang
           export CXX=clang++
           build_fft () {
-            clang++ -std=c++23 -O2 fft_tests.cpp -o ../bin/fft_tests && \
-            clang++ -std=c++23 -O2 fft_bench.cpp -lbenchmark -pthread -lfftw3f -o ../bin/fft_bench && \
-            clang++ -std=c++23 -O2 fft_profile.cpp -lprofiler -o ../bin/fft_profile
+            clang++ -std=c++23 -O3 fft_tests.cpp -o ../bin/fft_tests && \
+            clang++ -std=c++23 -O3 fft_bench.cpp -lbenchmark -pthread -lfftw3f -o ../bin/fft_bench && \
+            clang++ -std=c++23 -O3 fft_profile.cpp -lprofiler -o ../bin/fft_profile
           }
           mca_timeline () {
             clang++ fft_profile.cpp -O2 -S -o - | llvm-mca -skip-unsupported-instructions=lack-sched --timeline
           }
           build_tools () {
-            clang++ -std=c++23 -O3 cheb_tests.cpp -o ../bin/cheb_tests && \
-            clang++ -std=c++23 -O3 smooth_dist.cpp -o ../bin/smooth_dist
+            clang++ -std=c++23 -O2 cheb_tests.cpp -o ../bin/cheb_tests && \
+            clang++ -std=c++23 -O2 smooth_dist.cpp -o ../bin/smooth_dist && \
+            clang++ -std=c++23 -O2 roots_printer.cpp -o ../bin/roots_printer
           }
         '';
       };

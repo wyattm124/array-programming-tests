@@ -8,8 +8,7 @@
 #include <iomanip>
 
 /// TODO: 
-/// (1) - specialized DFT implementations for 6, 7, 8 as base cases
-///   -> these should be able to happen in registers and be very fast!
+/// (1) - Try templated FFT with float32x4_t aligned custom type
 /// (2) - implement Bluestiens's for numbers that do not decompse into these factors
 /// (3) - implement a top level search for best number to pad an input to for FFT
 
@@ -39,8 +38,8 @@ namespace FFT {
     inline float32x2_t neon_mul(const float32x2_t &__restrict__ a, const float32x2_t &__restrict__ b) noexcept {
         return {a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]};
     }
-    inline float32x2_t neon_mul_conj(const float32x2_t &__restrict__ a, const float32x2_t &__restrict__ b) noexcept {
-        return {a[0] * b[0] + a[1] * b[1], a[0] * b[1] - a[1] * b[0]};
+    inline float32x2_t neon_mul_conj(const float32x2_t &__restrict__ a, const float32x2_t &__restrict__ b_conj) noexcept {
+        return {a[0] * b_conj[0] + a[1] * b_conj[1], a[1] * b_conj[0] - a[0] * b_conj[1]};
     } 
 
     // For DFT Transpositions
@@ -166,13 +165,13 @@ namespace FFT {
                 data[0] = temp;
             } else if constexpr (N == 3) {
                 // TODO : write all math explicitly? See if that gives a speed boost.
-                static constexpr float32x2_t third_root = {-0.5f, 0.86660254f};
+                static constexpr float32x2_t third_root = {-0.5f, -0.86660254f};
                 const float32x2_t x_0 = data[0];
                 const float32x2_t x_1 = data[1];
                 const float32x2_t x_2 = data[2];
                 data[0] = x_0 + x_1 + x_2;
-                data[1] = x_0 + neon_mul_conj(third_root, x_1) + neon_mul(third_root, x_2);
-                data[2] = x_0 + neon_mul(third_root, x_1) + neon_mul_conj(third_root, x_2);
+                data[1] = x_0 + neon_mul(x_1, third_root) + neon_mul_conj(x_2, third_root);
+                data[2] = x_0 + neon_mul_conj(x_1, third_root) + neon_mul(x_2, third_root);
             } else if constexpr (N == 4) {
                 const float32x2_t x_0 = data[0];
                 const float32x2_t x_1 = data[1];
@@ -192,25 +191,25 @@ namespace FFT {
                     data[3] = a - b;
                 }
             } else if constexpr (N == 5) {
-                static constexpr float32x2_t root_1 = {0.30901699, 0.95105652};
-                static constexpr float32x2_t root_2 = {-0.80901699, 0.58778525};
+                static constexpr float32x2_t root_1 = {0.30901699, -0.95105652};
+                static constexpr float32x2_t root_2 = {-0.80901699, -0.58778525};
                 const float32x2_t x_0 = data[0];
                 const float32x2_t x_1 = data[1];
                 const float32x2_t x_2 = data[2];
                 const float32x2_t x_3 = data[3];
                 const float32x2_t x_4 = data[4];
                 data[0] = x_0 + x_1 + x_2 + x_3 + x_4;
-                data[1] = x_0 + neon_mul_conj(root_1, x_1) + neon_mul_conj(root_2, x_2) +
-                               neon_mul(root_2, x_3) + neon_mul(root_1, x_4);
-                data[2] = x_0 + neon_mul_conj(root_2, x_1) + neon_mul(root_1, x_2) +
-                               neon_mul_conj(root_1, x_3) + neon_mul(root_2, x_4);
-                data[3] = x_0 + neon_mul(root_2, x_1) + neon_mul_conj(root_1, x_2) +
-                               neon_mul(root_1, x_3) + neon_mul_conj(root_2, x_4);
-                data[4] = x_0 + neon_mul(root_1, x_1) + neon_mul(root_2, x_2) +
-                               neon_mul_conj(root_2, x_3) + neon_mul_conj(root_1, x_4);
+                data[1] = x_0 + neon_mul(x_1, root_1) + neon_mul(x_2, root_2) +
+                               neon_mul_conj(x_3, root_2) + neon_mul_conj(x_4, root_1);
+                data[2] = x_0 + neon_mul(x_1, root_2) + neon_mul_conj(x_2, root_1) +
+                               neon_mul(x_3, root_1) + neon_mul_conj(x_4, root_2);
+                data[3] = x_0 + neon_mul_conj(x_1, root_2) + neon_mul(x_2, root_1) +
+                               neon_mul_conj(x_3, root_1) + neon_mul(x_4, root_2);
+                data[4] = x_0 + neon_mul_conj(x_1, root_1) + neon_mul_conj(x_2, root_2) +
+                               neon_mul(x_3, root_2) + neon_mul(x_4, root_1);
             } else if constexpr (N == 6) {
                 static constexpr float r_a = 0.5f;
-                static constexpr float r_b = 0.8660254f;
+                static constexpr float r_b = -0.8660254f;
                 const float32x2_t x_0 = data[0];
                 const float32x2_t x_1 = data[1];
                 const float32x2_t x_2 = data[2];
@@ -237,9 +236,36 @@ namespace FFT {
                     data[2] = a + neon_mul(b, float32x2_t{-r_a, r_b}) + neon_mul(c, float32x2_t{-r_a, -r_b});
                     data[4] = a + neon_mul(b, float32x2_t{-r_a, -r_b}) + neon_mul(c, float32x2_t{-r_a, r_b});
                 }
+            } else if constexpr (N == 7) {
+                static constexpr float32x2_t r_1 = {0.62348980, -0.78183148};
+                static constexpr float32x2_t r_2 = {-0.22252093, -0.97492791};
+                static constexpr float32x2_t r_3 = {-0.90096887, -0.43388374};
+                const float32x2_t x_0 = data[0];
+                const float32x2_t x_1 = data[1];
+                const float32x2_t x_2 = data[2];
+                const float32x2_t x_3 = data[3];
+                const float32x2_t x_4 = data[4];
+                const float32x2_t x_5 = data[5];
+                const float32x2_t x_6 = data[6];
+                data[0] = x_0 + x_1 + x_2 + x_3 + x_4 + x_5 + x_6;
+                data[1] = x_0 + neon_mul(x_1, r_1) + neon_mul(x_2, r_2) + neon_mul(x_3, r_3) +
+                  neon_mul_conj(x_4, r_3) + neon_mul_conj(x_5, r_2) + neon_mul_conj(x_6, r_1);
+                data[2] = x_0 + neon_mul(x_1, r_2) + neon_mul_conj(x_2, r_3) + 
+                  neon_mul_conj(x_3, r_1) + neon_mul(x_4, r_1) + neon_mul(x_5, r_3) +
+                  neon_mul_conj(x_6, r_2);
+                data[3] = x_0 + neon_mul(x_1, r_3) + neon_mul_conj(x_2, r_1) + neon_mul(x_3, r_2) +
+                  neon_mul_conj(x_4, r_2) + neon_mul(x_5, r_1) + neon_mul_conj(x_6, r_3);
+                data[4] = x_0 + neon_mul_conj(x_1, r_3) + neon_mul(x_2, r_1) + 
+                  neon_mul_conj(x_3, r_2) + neon_mul(x_4, r_2) + neon_mul_conj(x_5, r_1) +
+                  neon_mul(x_6, r_3);
+                data[5] = x_0 + neon_mul_conj(x_1, r_2) + neon_mul(x_2, r_3) + neon_mul(x_3, r_1) +
+                  neon_mul_conj(x_4, r_1) + neon_mul_conj(x_5, r_3) + neon_mul(x_6, r_2);
+                data[6] = x_0 + neon_mul_conj(x_1, r_1) + neon_mul_conj(x_2, r_2) +
+                  neon_mul_conj(x_3, r_3) + neon_mul(x_4, r_3) + neon_mul(x_5, r_2) +
+                  neon_mul(x_6, r_1);
             } else if constexpr (N == 8) {
                 static constexpr float c = 0.70710678118f;
-                static constexpr float32x2_t eighth_root = {c,-c};
+                static constexpr float32x2_t eighth_root = {c,c};
                 static constexpr auto forth_root = [](float32x2_t x){
                     return float32x2_t{x[1], -x[0]};
                 };
@@ -278,15 +304,15 @@ namespace FFT {
                         const float32x2_t b_0_p = x_1 - x_5;
                         const float32x2_t b_0 = forth_root(b_0_p);
                         const float32x2_t b_1 = x_3 - x_7;
-                        data[3] = (a_0 - a_1) + neon_mul(eighth_root, b_1 + b_0);
-                        data[5] = (a_0 + a_1) + neon_mul_conj(eighth_root, b_1 - b_0);
+                        data[3] = (a_0 - a_1) + neon_mul_conj(b_1 + b_0, eighth_root);
+                        data[5] = (a_0 + a_1) + neon_mul(b_1 - b_0, eighth_root);
                     }
                     { // DFT for index 1 and 7
                         const float32x2_t b_0 = x_1 - x_5;
                         const float32x2_t b_1_p = x_3 - x_7;
                         const float32x2_t b_1 = forth_root(b_1_p);
-                        data[1] = (a_0 + a_1) + neon_mul(eighth_root, b_0 + b_1);
-                        data[7] = (a_0 - a_1) + neon_mul_conj(eighth_root, b_0 - b_1); 
+                        data[1] = (a_0 + a_1) + neon_mul_conj(b_0 + b_1, eighth_root);
+                        data[7] = (a_0 - a_1) + neon_mul(b_0 - b_1, eighth_root); 
                     }
                 }
             } else if constexpr (A == 1 || B == 1) { // Do the full DFT
@@ -327,7 +353,6 @@ namespace FFT {
                 for (unsigned int i = 0; i < A; i++)
                     FFTPlan<B>::fft_recurse(temp_data.data() + (i * B));
 
-                // TODO: In some cases the compiler seems to not do this step if given -O3
                 DFT_binner<A, B>(temp_data.data(), data);
             }
 
@@ -496,9 +521,17 @@ namespace FFT {
                 wave_gen(time_domain, freq_domain, N,
                     7, 2, 1);
             }
+            if (N > 5) {
+                wave_gen(time_domain, freq_domain, N,
+                    5, 2, 1);
+            }
+            if (N > 4) {
+                wave_gen(time_domain, freq_domain, N,
+                    4, 3, 2);
+            }
             if (N > 3) {
                 wave_gen(time_domain, freq_domain, N,
-                    3, 3, 1);
+                    3, 2, 1);
             }
             wave_gen(time_domain, freq_domain, N,
                 1, 1, 1);

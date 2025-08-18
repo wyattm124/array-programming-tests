@@ -170,11 +170,11 @@ std::pair<float, float> fft_opt_tester() {
 
     // Check Outputs
     float max_diff = 0;
-    /*for (std::size_t i = 0; i < N; i++) {
-        std::cout << std::fixed << std::setprecision(2) << time_domain1[i][0] << " + i" << time_domain1[i][1] << " - " <<
-          freq_domain1[i][0] << " + i" << freq_domain1[i][1] << std::endl;
+    for (std::size_t i = 0; i < N; i++) {
+        /*std::cout << std::fixed << std::setprecision(2) << time_domain1[i][0] << " + i" << time_domain1[i][1] << " - " <<
+          freq_domain1[i][0] << " + i" << freq_domain1[i][1] << std::endl;*/
         max_diff = std::max(max_diff, FFT::neon_abs(time_domain1[i] - freq_domain1[i]));
-    }*/
+    }
 
     // modify in place back to time domain
     FFT::FFTPlan<N>::ifft(time_domain1.data());
@@ -182,11 +182,13 @@ std::pair<float, float> fft_opt_tester() {
     // Check Outputs
     float max_inverse_diff = 0;
     for (std::size_t i = 0; i < N; i++) {
+        /*std::cout << std::fixed << std::setprecision(2) << time_domain1[i][0] << " + i" << time_domain1[i][1] << " - " <<
+          freq_domain1[i][0] << " + i" << freq_domain1[i][1] << std::endl;*/
         max_inverse_diff = std::max(max_inverse_diff, FFT::neon_abs(time_domain1[i] - time_domain1_copy[i]));
     }
     return {max_diff, max_inverse_diff};
 }
-TEST_CASE("FFT Opt Small Input") {
+TEST_CASE("FFT Opt Base Case Input") {
     auto Ans_3 = fft_opt_tester<3>();
     CHECK(Ans_3.first < 4e-4);
     CHECK(Ans_3.second < 2e-3);
@@ -198,38 +200,54 @@ TEST_CASE("FFT Opt Small Input") {
     auto Ans_5 = fft_opt_tester<5>();
     CHECK(Ans_5.first < 8e-6);
     CHECK(Ans_5.second < 3e-6);
+    
+    auto Ans_6 = fft_opt_tester<6>();
+    CHECK(Ans_6.first < 8e-6);
+    CHECK(Ans_6.second < 3e-6);
 
     auto Ans_7 = fft_opt_tester<7>();
-    CHECK(Ans_7.first < 8e-6);
-    CHECK(Ans_7.second < 3e-6);
+    CHECK(Ans_7.first < 1e-6);
+    CHECK(Ans_7.second < 4e-6);
+
+    auto Ans_8 = fft_opt_tester<8>();
+    CHECK(Ans_8.first < 2e-6);
+    CHECK(Ans_8.second < 5e-7);
 }
 
-TEST_CASE("FFT Opt Med Input") {
+TEST_CASE("FFT Opt Med Prime Input") {
     auto Ans_13 = fft_opt_tester<13>();
     CHECK(Ans_13.first < 8e-6);
-    CHECK(Ans_13.second < 2e-6); 
+    CHECK(Ans_13.second < 2e-6);
+    
+    auto Ans_53 = fft_opt_tester<53>();
+    CHECK(Ans_53.first < 3e-4);
+    CHECK(Ans_53.second < 5e-5);
 }
 
 TEST_CASE("FFT Opt Small Prime Composite Input") {
-    auto Ans_0 = fft_opt_tester<6>();
-    CHECK(Ans_0.first < 2e-3);
-    CHECK(Ans_0.second < 5e-3);
+    auto Ans_1 = fft_opt_tester<3 * 5>();
+    CHECK(Ans_1.first < 2e-5);
+    CHECK(Ans_1.second < 2e-2);
     
-    auto Ans_1 = fft_opt_tester<8>();
-    CHECK(Ans_1.first < 2e-3);
-    CHECK(Ans_1.second < 5e-3);
+    auto Ans_2 = fft_opt_tester<7 * 5>();
+    CHECK(Ans_2.first < 9e-5);
+    CHECK(Ans_2.second < 3e-5);
+
+    auto Ans_3 = fft_opt_tester<3 * 5 * 5>();
+    CHECK(Ans_3.first < 4e-4);
+    CHECK(Ans_3.second < 3e-1); 
     
-    auto Ans_2 = fft_opt_tester<3 * 5>();
-    CHECK(Ans_2.first < 3e-3);
-    CHECK(Ans_2.second < 2e-2);
-
-    auto Ans_3 = fft_opt_tester<3 * 5 * 7>();
-    CHECK(Ans_3.first < 4e-2);
-    CHECK(Ans_3.second < 3e-1);
-
-    auto Ans_4 = fft_opt_tester<3 * 5 * 7 * 11 * 13>();
-    CHECK(Ans_4.first < 4e-2);
+    auto Ans_4 = fft_opt_tester<3 * 5 * 7>();
+    CHECK(Ans_4.first < 7e-4);
     CHECK(Ans_4.second < 3e-1);
+
+    auto Ans_5 = fft_opt_tester<7 * 11>();
+    CHECK(Ans_5.first < 4e-4);
+    CHECK(Ans_5.second < 6e-5);
+
+    auto Ans_6 = fft_opt_tester<3 * 5 * 7 * 11 * 13>();
+    CHECK(Ans_6.first < 2e-3);
+    CHECK(Ans_6.second < 2e-2);
 }
 
 // TODO : Opt tests with larger numbers like 8192 and 8191?

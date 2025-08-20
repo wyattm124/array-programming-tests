@@ -66,6 +66,23 @@ BENCHMARK_DEFINE_F(Powerof2Fixture, Neon)(benchmark::State& state) {
     }
 }
 
+BENCHMARK_DEFINE_F(Powerof2Fixture, CustomComplex)(benchmark::State& state) {
+    // Need to Copy Data to Correct Type
+    std::array<FFT::Complex, Powerof2Fixture::N> temp_time_domain1 = {0};
+    std::array<FFT::Complex, Powerof2Fixture::N> temp_freq_domain1 = {0};
+    for (unsigned int i = 0; i < Powerof2Fixture::N; i++) {
+        temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
+        temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
+    }
+
+    // Make sure to do initialization
+    volatile auto fft_plan_n = FFT::FFTPlan<Powerof2Fixture::N, FFT::Complex>();
+
+    for (auto _ : state) {
+        FFT::FFTPlan<Powerof2Fixture::N, FFT::Complex>::fft(temp_time_domain1.data());
+    }
+}
+
 BENCHMARK_DEFINE_F(Powerof2Fixture, FFTW)(benchmark::State& state) {
     // Configure input with waves
     fftwf_complex *in, *out;
@@ -114,6 +131,23 @@ BENCHMARK_DEFINE_F(MersennePrimeFixture, Neon)(benchmark::State& state) {
 
     for (auto _ : state) {
         FFT::FFTPlan<MersennePrimeFixture::N>::fft(temp_time_domain1.data());
+    }
+}
+
+BENCHMARK_DEFINE_F(MersennePrimeFixture, CustomComplex)(benchmark::State& state) {
+    // Need to Copy Data to Correct Type
+    std::array<FFT::Complex, MersennePrimeFixture::N> temp_time_domain1 = {0};
+    std::array<FFT::Complex, MersennePrimeFixture::N> temp_freq_domain1 = {0};
+    for (unsigned int i = 0; i < MersennePrimeFixture::N; i++) {
+        temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
+        temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
+    }
+
+    // Make sure to do initialization
+    volatile auto fft_plan_n = FFT::FFTPlan<MersennePrimeFixture::N, FFT::Complex>();
+
+    for (auto _ : state) {
+        FFT::FFTPlan<MersennePrimeFixture::N, FFT::Complex>::fft(temp_time_domain1.data());
     }
 }
 
@@ -168,6 +202,23 @@ BENCHMARK_DEFINE_F(SmallPrimeFixture, Neon)(benchmark::State& state) {
     }
 }
 
+BENCHMARK_DEFINE_F(SmallPrimeFixture, CustomComplex)(benchmark::State& state) {
+    // Need to Copy Data to Correct Type
+    std::array<FFT::Complex, SmallPrimeFixture::N> temp_time_domain1 = {0};
+    std::array<FFT::Complex, SmallPrimeFixture::N> temp_freq_domain1 = {0};
+    for (unsigned int i = 0; i < SmallPrimeFixture::N; i++) {
+        temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
+        temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
+    }
+
+    // Make sure to do initialization
+    volatile auto fft_plan_n = FFT::FFTPlan<SmallPrimeFixture::N, FFT::Complex>();
+
+    for (auto _ : state) {
+        FFT::FFTPlan<SmallPrimeFixture::N, FFT::Complex>::fft(temp_time_domain1.data());
+    }
+}
+
 BENCHMARK_DEFINE_F(SmallPrimeFixture, FFTW)(benchmark::State& state) {
     // Configure input with waves
     fftwf_complex *in, *out;
@@ -198,16 +249,19 @@ BENCHMARK_DEFINE_F(SmallPrimeFixture, FFTW)(benchmark::State& state) {
 // Power of 2 Benchmarks
 BENCHMARK_REGISTER_F(Powerof2Fixture, Basic);
 BENCHMARK_REGISTER_F(Powerof2Fixture, Neon);
+BENCHMARK_REGISTER_F(Powerof2Fixture, CustomComplex);
 BENCHMARK_REGISTER_F(Powerof2Fixture, FFTW);
 
 // Mersenne Prime Benchmarks
 BENCHMARK_REGISTER_F(MersennePrimeFixture, Basic);
 BENCHMARK_REGISTER_F(MersennePrimeFixture, Neon);
+BENCHMARK_REGISTER_F(MersennePrimeFixture, CustomComplex);
 BENCHMARK_REGISTER_F(MersennePrimeFixture, FFTW);
 
 // Small Prime Benchmarks
 BENCHMARK_REGISTER_F(SmallPrimeFixture, Basic);
 BENCHMARK_REGISTER_F(SmallPrimeFixture, Neon);
+BENCHMARK_REGISTER_F(SmallPrimeFixture, CustomComplex);
 BENCHMARK_REGISTER_F(SmallPrimeFixture, FFTW);
 
 // Template out main

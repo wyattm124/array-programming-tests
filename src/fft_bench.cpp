@@ -6,8 +6,8 @@
 class Powerof2Fixture : public benchmark::Fixture {
 protected:
     constexpr static size_t N = 8192;
-    std::array<std::complex<float>, N> time_domain1;
-    std::array<std::complex<float>, N> freq_domain1;
+    alignas(16) std::array<std::complex<float>, N> time_domain1;
+    alignas(16) std::array<std::complex<float>, N> freq_domain1;
     
     void SetUp(const benchmark::State& state) {
         time_domain1.fill(0);
@@ -19,8 +19,8 @@ protected:
 class MersennePrimeFixture : public benchmark::Fixture {
 protected:
     constexpr static size_t N = 8191;
-    std::array<std::complex<float>, N> time_domain1;
-    std::array<std::complex<float>, N> freq_domain1;
+    alignas(16) std::array<std::complex<float>, N> time_domain1;
+    alignas(16) std::array<std::complex<float>, N> freq_domain1;
         
     void SetUp(const benchmark::State& state) {
         time_domain1.fill(0);
@@ -32,8 +32,8 @@ protected:
 class SmallPrimeFixture : public benchmark::Fixture {
 protected:
     constexpr static size_t N = 7;
-    std::array<std::complex<float>, N> time_domain1;
-    std::array<std::complex<float>, N> freq_domain1;
+    alignas(16) std::array<std::complex<float>, N> time_domain1;
+    alignas(16) std::array<std::complex<float>, N> freq_domain1;
         
     void SetUp(const benchmark::State& state) {
         time_domain1.fill(0);
@@ -51,8 +51,8 @@ BENCHMARK_DEFINE_F(Powerof2Fixture, Basic)(benchmark::State& state) {
 
 BENCHMARK_DEFINE_F(Powerof2Fixture, Neon)(benchmark::State& state) {
     // Need to Copy Data to Correct Type
-    std::array<float32x2_t, Powerof2Fixture::N> temp_time_domain1 = {0};
-    std::array<float32x2_t, Powerof2Fixture::N> temp_freq_domain1 = {0};
+    alignas(16) std::array<float32x2_t, Powerof2Fixture::N> temp_time_domain1 = {0};
+    alignas(16) std::array<float32x2_t, Powerof2Fixture::N> temp_freq_domain1 = {0};
     for (unsigned int i = 0; i < Powerof2Fixture::N; i++) {
         temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
         temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
@@ -68,8 +68,8 @@ BENCHMARK_DEFINE_F(Powerof2Fixture, Neon)(benchmark::State& state) {
 
 BENCHMARK_DEFINE_F(Powerof2Fixture, CustomComplex)(benchmark::State& state) {
     // Need to Copy Data to Correct Type
-    std::array<FFT::Complex, Powerof2Fixture::N> temp_time_domain1 = {0};
-    std::array<FFT::Complex, Powerof2Fixture::N> temp_freq_domain1 = {0};
+    alignas(16) std::array<FFT::Complex, Powerof2Fixture::N> temp_time_domain1 = {0};
+    alignas(16) std::array<FFT::Complex, Powerof2Fixture::N> temp_freq_domain1 = {0};
     for (unsigned int i = 0; i < Powerof2Fixture::N; i++) {
         temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
         temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
@@ -119,8 +119,8 @@ BENCHMARK_DEFINE_F(MersennePrimeFixture, Basic)(benchmark::State& state) {
 
 BENCHMARK_DEFINE_F(MersennePrimeFixture, Neon)(benchmark::State& state) {
     // Need to Copy Data to Correct Type
-    std::array<float32x2_t, MersennePrimeFixture::N> temp_time_domain1 = {0};
-    std::array<float32x2_t, MersennePrimeFixture::N> temp_freq_domain1 = {0};
+    alignas(16) std::array<float32x2_t, MersennePrimeFixture::N> temp_time_domain1 = {0};
+    alignas(16) std::array<float32x2_t, MersennePrimeFixture::N> temp_freq_domain1 = {0};
     for (unsigned int i = 0; i < MersennePrimeFixture::N; i++) {
         temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
         temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
@@ -136,8 +136,8 @@ BENCHMARK_DEFINE_F(MersennePrimeFixture, Neon)(benchmark::State& state) {
 
 BENCHMARK_DEFINE_F(MersennePrimeFixture, CustomComplex)(benchmark::State& state) {
     // Need to Copy Data to Correct Type
-    std::array<FFT::Complex, MersennePrimeFixture::N> temp_time_domain1 = {0};
-    std::array<FFT::Complex, MersennePrimeFixture::N> temp_freq_domain1 = {0};
+    alignas(16) std::array<FFT::Complex, MersennePrimeFixture::N> temp_time_domain1 = {0};
+    alignas(16) std::array<FFT::Complex, MersennePrimeFixture::N> temp_freq_domain1 = {0};
     for (unsigned int i = 0; i < MersennePrimeFixture::N; i++) {
         temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
         temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
@@ -187,8 +187,8 @@ BENCHMARK_DEFINE_F(SmallPrimeFixture, Basic)(benchmark::State& state) {
 
 BENCHMARK_DEFINE_F(SmallPrimeFixture, Neon)(benchmark::State& state) {
     // Need to Copy Data to Correct Type
-    std::array<float32x2_t, SmallPrimeFixture::N> temp_time_domain1 = {0};
-    std::array<float32x2_t, SmallPrimeFixture::N> temp_freq_domain1 = {0};
+    alignas(16) std::array<float32x2_t, SmallPrimeFixture::N> temp_time_domain1 = {0};
+    alignas(16) std::array<float32x2_t, SmallPrimeFixture::N> temp_freq_domain1 = {0};
     for (unsigned int i = 0; i < SmallPrimeFixture::N; i++) {
         temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
         temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};
@@ -204,8 +204,8 @@ BENCHMARK_DEFINE_F(SmallPrimeFixture, Neon)(benchmark::State& state) {
 
 BENCHMARK_DEFINE_F(SmallPrimeFixture, CustomComplex)(benchmark::State& state) {
     // Need to Copy Data to Correct Type
-    std::array<FFT::Complex, SmallPrimeFixture::N> temp_time_domain1 = {0};
-    std::array<FFT::Complex, SmallPrimeFixture::N> temp_freq_domain1 = {0};
+    alignas(16) std::array<FFT::Complex, SmallPrimeFixture::N> temp_time_domain1 = {0};
+    alignas(16) std::array<FFT::Complex, SmallPrimeFixture::N> temp_freq_domain1 = {0};
     for (unsigned int i = 0; i < SmallPrimeFixture::N; i++) {
         temp_time_domain1[i] = {time_domain1[i].real(), time_domain1[i].imag()};
         temp_freq_domain1[i] = {freq_domain1[i].real(), freq_domain1[i].imag()};

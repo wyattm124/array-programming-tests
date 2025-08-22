@@ -152,13 +152,15 @@ TEST_CASE("FFT Basic Small Input") {
     CHECK(max_diff < 5e-6);
 }
 
+// Error is measured as the maximum magnitude of the difference
+//  between any pair of computed and expected values
 template<unsigned int N>
 std::pair<float, float> fft_opt_tester() {
     // Test Inputs
-    std::array<FFT::Complex, N> time_domain1 = {0};
-    std::array<FFT::Complex, N> freq_domain1 = {0};
+    alignas(16) std::array<FFT::Complex, N> time_domain1 = {0};
+    alignas(16) std::array<FFT::Complex, N> freq_domain1 = {0};
     FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
-    std::array<FFT::Complex, N> time_domain1_copy;
+    alignas(16) std::array<FFT::Complex, N> time_domain1_copy;
     for (std::size_t i = 0; i < N; i++)
         time_domain1_copy[i] = time_domain1[i];
     
@@ -188,40 +190,45 @@ std::pair<float, float> fft_opt_tester() {
     }
     return {max_diff, max_inverse_diff};
 }
+
+// Try to ensure max error is ~1e-6
 TEST_CASE("FFT Opt Base Case Input") {
     auto Ans_3 = fft_opt_tester<3>();
-    CHECK(Ans_3.first < 4e-4);
-    CHECK(Ans_3.second < 2e-3);
+    CHECK(Ans_3.first < 2e-7);
+    CHECK(Ans_3.second < 2e-7);
 
     auto Ans_4 = fft_opt_tester<4>();
-    CHECK(Ans_4.first < 2e-5);
-    CHECK(Ans_4.second < 3e-6);
+    CHECK(Ans_4.first < 5e-7);
+    CHECK(Ans_4.second < 2e-7);
     
     auto Ans_5 = fft_opt_tester<5>();
-    CHECK(Ans_5.first < 8e-6);
-    CHECK(Ans_5.second < 3e-6);
+    CHECK(Ans_5.first < 6e-7);
+    CHECK(Ans_5.second < 3e-7);
     
     auto Ans_6 = fft_opt_tester<6>();
-    CHECK(Ans_6.first < 8e-6);
-    CHECK(Ans_6.second < 3e-6);
+    CHECK(Ans_6.first < 1.3e-6);
+    CHECK(Ans_6.second < 3e-7);
 
     auto Ans_7 = fft_opt_tester<7>();
-    CHECK(Ans_7.first < 1e-6);
-    CHECK(Ans_7.second < 4e-6);
+    CHECK(Ans_7.first < 9.3e-7);
+    CHECK(Ans_7.second < 4e-7);
 
     auto Ans_8 = fft_opt_tester<8>();
-    CHECK(Ans_8.first < 2e-6);
-    CHECK(Ans_8.second < 5e-7);
+    CHECK(Ans_8.first < 1.1e-6);
+    CHECK(Ans_8.second < 2e-7);
 }
 
+// Keep error resonably small on small DFTs (un measurably small)
+//  and not significant on medium DFTS (in the 1e-4 range)
 TEST_CASE("FFT Opt Med Prime Input") {
+    // Error on DFT of N 13 goes to float 0
     auto Ans_13 = fft_opt_tester<13>();
-    CHECK(Ans_13.first < 8e-6);
-    CHECK(Ans_13.second < 2e-6);
+    CHECK(Ans_13.first < 1e-9);
+    CHECK(Ans_13.second < 1e-9);
     
     auto Ans_53 = fft_opt_tester<53>();
-    CHECK(Ans_53.first < 3e-4);
-    CHECK(Ans_53.second < 7e-5);
+    CHECK(Ans_53.first < 2.3e-4);
+    CHECK(Ans_53.second < 6.2e-5);
 }
 
 TEST_CASE("FFT Opt Small Prime Composite Input") {

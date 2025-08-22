@@ -60,7 +60,7 @@
             clang++ -std=c++23 -O3 fft_profile.cpp -lprofiler -o ../bin/fft_profile
           }
           mca_timeline () {
-            clang++ fft_profile.cpp -O3 -S -o - | llvm-mca -skip-unsupported-instructions=lack-sched --timeline
+            clang++ -std=c++23 -O3 fft_profile.cpp -S -o - | llvm-mca -skip-unsupported-instructions=lack-sched --timeline
           }
           build_tools () {
             clang++ -std=c++23 -O2 cheb_tests.cpp -o ../bin/cheb_tests && \

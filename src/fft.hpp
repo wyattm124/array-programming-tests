@@ -217,6 +217,8 @@ namespace FFT {
         // In-place Mixed Radix Cooley Tukey FFT
         static void fft_recurse(T *__restrict__ data) noexcept {
             T* aligned_data = std::assume_aligned<16>(data);
+
+            MCA_START
             // Base case + direct DFT cases
             if constexpr (N == 1) {
                 // Do nothing, just return
@@ -298,7 +300,7 @@ namespace FFT {
                     aligned_data[4] = a + mult(b, T{-r_a, -r_b}) + mult(c, T{-r_a, r_b});
                 }
             } else if constexpr (N == 7) {
-                MCA_START
+                // TODO : to make this comparable with FFTW, I would need to use Rader's algorithm
                 static constexpr T r_1 = {0.623489801859, -0.781831482468};
                 static constexpr T r_2 = {-0.222520933956, -0.974927912182};
                 static constexpr T r_3 = {-0.900968867902, -0.433883739118};
@@ -325,7 +327,6 @@ namespace FFT {
                 aligned_data[6] = x_0 + mult_conj(x_1, r_1) + mult_conj(x_2, r_2) +
                   mult_conj(x_3, r_3) + mult(x_4, r_3) + mult(x_5, r_2) +
                   mult(x_6, r_1);
-                MCA_END
             } else if constexpr (N == 8) {
                 static constexpr float c = 0.707106781187f;
                 static constexpr T eighth_root = {c,c};
@@ -418,6 +419,7 @@ namespace FFT {
 
                 DFT_binner<A, B>(temp_data.data(), aligned_data);
             }
+            MCA_END
 
             // This function is in-place! the input is modified with the result.
             return;

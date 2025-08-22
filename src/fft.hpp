@@ -1,40 +1,111 @@
+#include <cmath>
+#include <cstddef>
+#include <memory>
 #include <array>
 #include <complex>
-#include <cstddef>
-#include <cmath>
-#include <arm_neon.h>
-#include "prime_factor.hpp"
 #include <iostream>
+#include <iomanip>
+#include <arm_neon.h>
 
-/// TODO: 
-/// (1) - Raders DFT implementations for 3 - 7
-/// (2) - specialized DFT implementations for 2, 4, 6, 8
-/// (3) - implement these as base cases in FFTPlan
-/// (4) - implemnt them for recursive steps in FFT plan
-/// (5) - implement Bluestiens's for numbers that do not decompse into these factors
-/// (6) - implement a top level search for best number to pad an input to for FFT
+#include "prime_factor.hpp"
+
+/// TODO:
+/// (2) - implement Bluestiens's for numbers that do not decompse into these factors
+/// (3) - implement a top level search for best number to pad an input to for FFT
 
 // For LLVM MCA Analysis
 #define MCA_START __asm volatile("# LLVM-MCA-BEGIN");
 #define MCA_END __asm volatile("# LLVM-MCA-END");
 
 namespace FFT {
-    // Neon intrinsics
-    inline float32x2_t neon_mul(const float32x2_t &__restrict__ a, const float32x2_t &__restrict__ b) noexcept {
-        return {a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]};
+    struct alignas(8) Complex {
+        float data[2];
+        
+        // Accessors
+        float& operator[](size_t i) { return data[i]; }
+        const float& operator[](size_t i) const { return data[i]; }
+        
+        // Default constructor
+        constexpr Complex() : data{0, 0} {}
+        
+        // Initialization constructor
+        constexpr Complex(float r, float i = 0.0f) : data{r, i} {}
+        
+        // Operators
+        friend constexpr Complex operator+(const Complex& a, const Complex& b) noexcept {
+            return {a[0] + b[0], a[1] + b[1]};
+        }
+        
+        friend constexpr Complex operator-(const Complex& a, const Complex& b) noexcept {
+            return {a[0] - b[0], a[1] - b[1]};
+        }
+
+        friend constexpr Complex operator*(const Complex& a, float b) noexcept {
+            return {a[0] * b, a[1] * b};
+        }
+        
+        friend constexpr Complex operator*(const Complex& a, const Complex& b) noexcept {
+            return {a[0] * b[0], a[1] * b[1]};
+        }
+
+        Complex& operator+=(const Complex& b) noexcept {
+            data[0] += b[0];
+            data[1] += b[1];
+            return *this;
+        }
+        
+        Complex& operator/=(float b) noexcept {
+            data[0] /= b;
+            data[1] /= b;
+            return *this;
+        }
+        
+        // Implicit conversion from std::complex for compatibility
+        //Complex(const std::complex<float>& c) : data{c.real(), c.imag()} {}
+        //operator std::complex<float>() const { return {data[0], data[1]}; }
+    };
+
+    // These are the factors from highest priority to lowest priority, with
+    //  with the highest priority at the lowest index
+    constexpr unsigned int factors[] = {8, 4, 6};
+    constexpr unsigned int get_best_factor(unsigned int N) {
+        for (auto factor : factors) {
+            if (N % factor == 0)
+                return factor;
+        }
+        return prime_factor::get_prime_factor(N);
     }
-    inline float neon_abs(const float32x2_t &__restrict__ a) noexcept {
+
+    template <typename T>
+    inline float abs(const T &__restrict__ a) noexcept {
         return std::sqrt(a[0]*a[0] + a[1]*a[1]);
     }
-    inline float32x2_t neon_conj(const float32x2_t &__restrict__ a) noexcept {
+
+    template <typename T>
+    constexpr T conj(const T &__restrict__ a) noexcept {
         return {a[0], -a[1]};
     }
+
+    template <typename T>
+    constexpr T flipper(const T &__restrict__ a) noexcept {
+        return {a[1], a[0]};
+    }
+
+    template <typename T>
+    inline T mult(const T &__restrict__ a, const T &__restrict__ b) noexcept {
+        return {a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]};
+    }
+    template <typename T>
+    inline T mult_conj(const T &__restrict__ a, const T &__restrict__ b_conj) noexcept {
+        return {a[0] * b_conj[0] + a[1] * b_conj[1], a[1] * b_conj[0] - a[0] * b_conj[1]};
+    } 
 
     // For DFT Transpositions
     template <unsigned int A, unsigned int B, typename T>
     void DFT_binner(T *__restrict__ in, T *__restrict__ out) noexcept {
         // Base case
-        if constexpr (A * B == 1) {
+        if constexpr (A == 1 || B == 1) {
+            std::copy(in, in + A * B, out);
             return;
         }
 
@@ -55,7 +126,7 @@ namespace FFT {
     template <unsigned int A, unsigned int B>
     void DFT_binner_inplace(float32x2_t *__restrict__ data) {
         // Base case
-        if constexpr (A < 2) {
+        if constexpr (A == 1 || B == 1) {
             return;
         }
 
@@ -101,26 +172,13 @@ namespace FFT {
     }
     
     constexpr double TwoPI = 2.0 * M_PI;
-    constexpr double NegTwoPI = -TwoPI;
-    
-    // TODO: Only for circular convolution test! everything 7 seems to all be able to
-    //  happen in registers and is sub ns fast!
-    void raders_7(float32x2_t *__restrict__ in, float32x2_t *__restrict__ out, float32x2_t *__restrict__ coeff) {
-        MCA_START
-        //#pragma clang loop unroll_count(7)
-        for (unsigned int i = 0; i < 7; i++)
-            //#pragma clang loop unroll_count(7)
-            for (unsigned int j = 0; j < 7; j++)
-                out[i] += neon_mul(in[j], coeff[(j + i) % 7]);
-        MCA_END
-        return;   
-    }
+    constexpr double NegTwoPI = -TwoPI; 
 
-    template <std::size_t N>
+    template <unsigned int N, typename T = float32x2_t>
     class FFTPlan {
         public:
-        static constexpr std::size_t A = prime_factor::get_prime_factor(N);
-        static constexpr std::size_t B = N / A;
+        static constexpr unsigned int A = get_best_factor(N);
+        static constexpr unsigned int B = N / A;
 
         FFTPlan() {
             // Ensure the coeffs are calculated
@@ -129,8 +187,9 @@ namespace FFT {
 
         // TODO : may want to shift the result so that DC component is at the center,
         //  but without this shift the FFT and IFFT are inverses of each other
-        static void fft(float32x2_t *__restrict__ data) noexcept {
-            fft_recurse(data);
+        static void fft(T *__restrict__ data) noexcept {
+            T* aligned_data = std::assume_aligned<16>(data);
+            fft_recurse(aligned_data);
 
             // Normalize
             for (std::size_t i = 0; i < N; i++)
@@ -139,14 +198,15 @@ namespace FFT {
             return;
         }
 
-        static void ifft(float32x2_t *__restrict__ data) noexcept {
+        static void ifft(T *__restrict__ data) noexcept {
+            T* aligned_data = std::assume_aligned<16>(data);
             for (std::size_t i = 0; i < N; i++)
-                data[i] = neon_conj(data[i]);
+                aligned_data[i] = conj(aligned_data[i]);
 
-            fft_recurse(data);
+            fft_recurse(aligned_data);
 
             for (std::size_t i = 0; i < N; i++)
-                data[i] = neon_conj(data[i]);
+                aligned_data[i] = conj(aligned_data[i]);
 
             // NOTE : if the fft is normalized, the ifft does not need to be normalized
             //  to keep the ifft the exact inverse operation of the fft.
@@ -155,59 +215,211 @@ namespace FFT {
         }
         
         // In-place Mixed Radix Cooley Tukey FFT
-        static void fft_recurse(float32x2_t *__restrict__ data) noexcept {
-            // Base case
-            if constexpr (N < 2) {
-                return;
+        static void fft_recurse(T *__restrict__ data) noexcept {
+            T* aligned_data = std::assume_aligned<16>(data);
+
+            MCA_START
+            // Base case + direct DFT cases
+            if constexpr (N == 1) {
+                // Do nothing, just return
             } else if constexpr (N == 2) {
-                const float32x2_t a = data[0] + data[1];
-                data[1] = data[0] - data[1];
-                data[0] = a;
-                return;
-            }
-
-            std::array<float32x2_t, N> temp;
-            if constexpr (B == 1) {
-                for (std::size_t i = 0; i < A; i++)
-                    temp[i] = data[i];
-            } else {
-                // Transpose Input Data around the radix
-                DFT_binner<B, A>(data, temp.data());
-
-                // Recursively apply fft to each bin
-                for (std::size_t i = 0; i < A; i++)
-                    FFTPlan<B>::fft_recurse(temp.data() + (i * B));
-            }
-
-            // Do tensor multiplication of coeffs with data
-            float32x2_t* coefs = gen_coefs_by_angle();
-            for (std::size_t i = 0; i < B; i++) {
-                #pragma clang loop unroll_count(32)
-                for (std::size_t j = 0; j < A; j++) {
-                    //MCA_START
-                    float32x2_t temp_ans = {0, 0};
-                    auto index = i * A * A + j * A;
-                    #pragma clang loop unroll_count(32)
-                    for (std::size_t k = 0; k < A; k++) {
-                        const auto coeff = coefs[index + k];
-                        if constexpr (B == 1) {
-                            const auto temp_val = temp[k];
-                            temp_ans += neon_mul(temp_val, coeff);
-                        } else {
-                            const auto temp_val = temp[i + (k * B)];
-                            temp_ans += neon_mul(temp_val, coeff);
-                        }
-                    }
-
-                    // Store the answer
-                    if constexpr (B == 1) {
-                        data[j] = temp_ans;
-                    } else {
-                        data[i + (j * B)] = temp_ans;
-                    }
-                    //MCA_END
+                const auto temp = aligned_data[0] + aligned_data[1];
+                aligned_data[1] = aligned_data[0] - aligned_data[1];
+                aligned_data[0] = temp;
+            } else if constexpr (N == 3) {
+                // TODO : write all math explicitly? See if that gives a speed boost.
+                static constexpr T third_root = {-0.5f, -0.866025403784f};
+                const T x_0 = aligned_data[0];
+                const T x_1 = aligned_data[1];
+                const T x_2 = aligned_data[2];
+                aligned_data[0] = x_0 + x_1 + x_2;
+                aligned_data[1] = x_0 + mult(x_1, third_root) + mult_conj(x_2, third_root);
+                aligned_data[2] = x_0 + mult_conj(x_1, third_root) + mult(x_2, third_root);
+            } else if constexpr (N == 4) {
+                const T x_0 = aligned_data[0];
+                const T x_1 = aligned_data[1];
+                const T x_2 = aligned_data[2];
+                const T x_3 = aligned_data[3];
+                { // First do evens
+                    const T a = x_0 + x_2;
+                    const T b = x_1 + x_3;
+                    aligned_data[0] = a + b;
+                    aligned_data[2] = a - b;
                 }
+                { // Then do odds
+                    const T a = x_0 - x_2;
+                    const T temp_b = x_1 - x_3;
+                    const T b = {temp_b[1], -temp_b[0]};
+                    aligned_data[1] = a + b;
+                    aligned_data[3] = a - b;
+                }
+            } else if constexpr (N == 5) {
+                static constexpr T root_1 = {0.309016994375, -0.951056516295};
+                static constexpr T root_2 = {-0.809016994375, -0.587785252292};
+                const T x_0 = aligned_data[0];
+                const T x_1 = aligned_data[1];
+                const T x_2 = aligned_data[2];
+                const T x_3 = aligned_data[3];
+                const T x_4 = aligned_data[4];
+                aligned_data[0] = x_0 + x_1 + x_2 + x_3 + x_4;
+                aligned_data[1] = x_0 + mult(x_1, root_1) + mult(x_2, root_2) +
+                               mult_conj(x_3, root_2) + mult_conj(x_4, root_1);
+                aligned_data[2] = x_0 + mult(x_1, root_2) + mult_conj(x_2, root_1) +
+                               mult(x_3, root_1) + mult_conj(x_4, root_2);
+                aligned_data[3] = x_0 + mult_conj(x_1, root_2) + mult(x_2, root_1) +
+                               mult_conj(x_3, root_1) + mult(x_4, root_2);
+                aligned_data[4] = x_0 + mult_conj(x_1, root_1) + mult_conj(x_2, root_2) +
+                               mult(x_3, root_2) + mult(x_4, root_1);
+            } else if constexpr (N == 6) {
+                static constexpr float r_a = 0.5f;
+                static constexpr float r_b = -0.866025403784f;
+                const T x_0 = aligned_data[0];
+                const T x_1 = aligned_data[1];
+                const T x_2 = aligned_data[2];
+                const T x_3 = aligned_data[3];
+                const T x_4 = aligned_data[4];
+                const T x_5 = aligned_data[5];
+                {
+                    const T a = x_0 + x_2 + x_4;
+                    const T b = x_1 + x_3 + x_5;
+                    aligned_data[0] = a + b;
+                    aligned_data[3] = a - b;
+                }
+                {
+                    const T a = x_0 - x_3;
+                    const T b = x_1 - x_4;
+                    const T c = x_2 - x_5;
+                    aligned_data[1] = a + mult(b, T{r_a, r_b}) + mult(c, T{-r_a, r_b});
+                    aligned_data[5] = a + mult(b, T{r_a, -r_b}) + mult(c, T{-r_a, -r_b});
+                }
+                {
+                    const T a = x_0 + x_3;
+                    const T b = x_1 + x_4;
+                    const T c = x_2 + x_5;
+                    aligned_data[2] = a + mult(b, T{-r_a, r_b}) + mult(c, T{-r_a, -r_b});
+                    aligned_data[4] = a + mult(b, T{-r_a, -r_b}) + mult(c, T{-r_a, r_b});
+                }
+            } else if constexpr (N == 7) {
+                // TODO : to make this comparable with FFTW, I would need to use Rader's algorithm
+                static constexpr T r_1 = {0.623489801859, -0.781831482468};
+                static constexpr T r_2 = {-0.222520933956, -0.974927912182};
+                static constexpr T r_3 = {-0.900968867902, -0.433883739118};
+                const T x_0 = aligned_data[0];
+                const T x_1 = aligned_data[1];
+                const T x_2 = aligned_data[2];
+                const T x_3 = aligned_data[3];
+                const T x_4 = aligned_data[4];
+                const T x_5 = aligned_data[5];
+                const T x_6 = aligned_data[6];
+                aligned_data[0] = x_0 + x_1 + x_2 + x_3 + x_4 + x_5 + x_6;
+                aligned_data[1] = x_0 + mult(x_1, r_1) + mult(x_2, r_2) + mult(x_3, r_3) +
+                  mult_conj(x_4, r_3) + mult_conj(x_5, r_2) + mult_conj(x_6, r_1);
+                aligned_data[2] = x_0 + mult(x_1, r_2) + mult_conj(x_2, r_3) + 
+                  mult_conj(x_3, r_1) + mult(x_4, r_1) + mult(x_5, r_3) +
+                  mult_conj(x_6, r_2);
+                aligned_data[3] = x_0 + mult(x_1, r_3) + mult_conj(x_2, r_1) + mult(x_3, r_2) +
+                  mult_conj(x_4, r_2) + mult(x_5, r_1) + mult_conj(x_6, r_3); 
+                aligned_data[4] = x_0 + mult_conj(x_1, r_3) + mult(x_2, r_1) + 
+                  mult_conj(x_3, r_2) + mult(x_4, r_2) + mult_conj(x_5, r_1) +
+                  mult(x_6, r_3);
+                aligned_data[5] = x_0 + mult_conj(x_1, r_2) + mult(x_2, r_3) + mult(x_3, r_1) +
+                  mult_conj(x_4, r_1) + mult_conj(x_5, r_3) + mult(x_6, r_2);
+                aligned_data[6] = x_0 + mult_conj(x_1, r_1) + mult_conj(x_2, r_2) +
+                  mult_conj(x_3, r_3) + mult(x_4, r_3) + mult(x_5, r_2) +
+                  mult(x_6, r_1);
+            } else if constexpr (N == 8) {
+                static constexpr float c = 0.707106781187f;
+                static constexpr T eighth_root = {c,c};
+                static constexpr auto forth_root = [](T x){
+                    return T{x[1], -x[0]};
+                };
+                const T x_0 = aligned_data[0];
+                const T x_1 = aligned_data[1];
+                const T x_2 = aligned_data[2];
+                const T x_3 = aligned_data[3];
+                const T x_4 = aligned_data[4];
+                const T x_5 = aligned_data[5];
+                const T x_6 = aligned_data[6];
+                const T x_7 = aligned_data[7];
+                {
+                    const T a_0 = x_0 + x_4;
+                    const T a_1 = x_2 + x_6;
+                    const T b_0 = x_1 + x_5;
+                    const T b_1 = x_3 + x_7;
+                    { // 0 and 4 index, based on 2 DFTs of size 4 + shifted for index 2 and 6
+                        const T a = a_0 + a_1;
+                        const T b = b_0 + b_1;
+                        aligned_data[0] = a + b;
+                        aligned_data[4] = a - b;
+                    }
+                    { // 2 and 6 index, based on 2 DFTs of size 4 + shifted for index 0 and 4
+                        const T a = a_0 - a_1;
+                        const T b_p = b_0 - b_1;
+                        const T b = forth_root(b_p);
+                        aligned_data[2] = a + b;
+                        aligned_data[6] = a - b;
+                    }
+                }
+                {
+                    const T a_0 = x_0 - x_4;
+                    const T a_1_p = x_2 - x_6;
+                    const T a_1 = forth_root(a_1_p);
+                    { // index 3 and 5
+                        const T b_0_p = x_1 - x_5;
+                        const T b_0 = forth_root(b_0_p);
+                        const T b_1 = x_3 - x_7;
+                        aligned_data[3] = (a_0 - a_1) + mult_conj(b_1 + b_0, eighth_root);
+                        aligned_data[5] = (a_0 + a_1) + mult(b_1 - b_0, eighth_root);
+                    }
+                    { // DFT for index 1 and 7
+                        const T b_0 = x_1 - x_5;
+                        const T b_1_p = x_3 - x_7;
+                        const T b_1 = forth_root(b_1_p);
+                        aligned_data[1] = (a_0 + a_1) + mult_conj(b_0 + b_1, eighth_root);
+                        aligned_data[7] = (a_0 - a_1) + mult(b_0 - b_1, eighth_root); 
+                    }
+                }
+            } else if constexpr (A == 1 || B == 1) { // Do the full DFT
+                auto dft_matrix = gen_coefs_by_angle();
+                std::array<T, N> temp_data;
+
+                // Do a full DFT
+                for (unsigned int i = 0; i < N; i++) {
+                    T temp_ans = {0, 0};
+                    for (unsigned int j = 0; j < N; j++) {
+                        temp_ans += mult(data[j], dft_matrix[i * N + j]);
+                    }
+                    temp_data[i] = temp_ans;
+                }
+
+                for (unsigned int i = 0; i < N; i++)
+                    data[i] = temp_data[i];
+            } else { // Do a mixed radix FFT
+                alignas(16) std::array<T, N> temp_data;
+
+                // Transpose Input Data around the first radix
+                DFT_binner<A, B>(aligned_data, temp_data.data());
+ 
+                // Do the A sized FFT on each bin
+                for (unsigned int i = 0; i < B; i++)
+                    FFTPlan<A, T>::fft_recurse(temp_data.data() + (i * A));
+
+                // Multiply by Cooley Tukey Twiddle factors
+                T *twiddle_factors = gen_coefs_by_angle();
+                for (unsigned int i = 0; i < N; i++) {
+                    aligned_data[i] = mult(temp_data[i], twiddle_factors[((i / A) * (i % A)) % N]);
+                }
+
+                // Transpose around the second radix
+                DFT_binner<B, A>(aligned_data, temp_data.data());
+
+                // Do the B sized FFT on each bin
+                for (unsigned int i = 0; i < A; i++)
+                    FFTPlan<B, T>::fft_recurse(temp_data.data() + (i * B));
+
+                DFT_binner<A, B>(temp_data.data(), aligned_data);
             }
+            MCA_END
 
             // This function is in-place! the input is modified with the result.
             return;
@@ -222,57 +434,66 @@ namespace FFT {
         
         // NOTE : Although this is technically correct to calculate coeffs, it is not as
         //   numerically stable as the angle based method.
-        static float32x2_t* get_coefs_by_mult() {
-            static float32x2_t* coefs = []{
-                float32x2_t* result = new float32x2_t[N * A];
+        static T* get_coefs_by_mult() {
+            static T* coefs = []{
+                T* result = new T[N * A];
             
                 // Setup constant factors for incremental rotations by multiplication
                 constexpr float small_angle = 
                     static_cast<float>(NegTwoPI / static_cast<double>(N));
                 constexpr float big_angle = 
                     static_cast<float>(NegTwoPI / static_cast<double>(A));
-                const float32x2_t small_inc = {std::cosf(small_angle), std::sinf(small_angle)};
-                const float32x2_t big_inc = {std::cosf(big_angle), std::sinf(big_angle)};
+                const T small_inc = {std::cosf(small_angle), std::sinf(small_angle)};
+                const T big_inc = {std::cosf(big_angle), std::sinf(big_angle)};
         
-                float32x2_t i_factor = {1, 0};
+                T i_factor = {1, 0};
                 for (std::size_t i = 0; i < B; i++) {
-                    float32x2_t j_factor = i_factor;
+                    T j_factor = i_factor;
                     for (std::size_t j = 0; j < A; j++) {
-                        float32x2_t k_factor = {1, 0};
+                        T k_factor = {1, 0};
                         for (std::size_t k = 0; k < A; k++) {
                             result[i * A * A + j * A + k] = k_factor;
-                            k_factor = neon_mul(k_factor, j_factor);
+                            k_factor = mult(k_factor, j_factor);
                         }
-                        j_factor = neon_mul(j_factor, big_inc);
+                        j_factor = mult(j_factor, big_inc);
                     }
-                    i_factor = neon_mul(i_factor, small_inc);
+                    i_factor = mult(i_factor, small_inc);
                 }
                 return result;
             }();
             return coefs;
         }
         
-        static float32x2_t gen_factor_by_angle(std::size_t i, std::size_t j, std::size_t k) {
+        static T gen_factor_by_angle(std::size_t i, std::size_t j, std::size_t k) {
             const double angle = NegTwoPI * static_cast<double>(i * (k + j * B)) / static_cast<double>(N);
             return {static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
         };
-        static float32x2_t* gen_coefs_by_angle() {
-            static float32x2_t* coefs = []{
-                float32x2_t* result = new float32x2_t[N * A];
-            
-                for (std::size_t i = 0; i < B; i++) {
-                    for (std::size_t j = 0; j < A; j++) {
-                        for (std::size_t k = 0; k < A; k++) {
-                            const auto index = i * A * A + j * A + k;
-                            result[index] = gen_factor_by_angle(k, j, i);
-                        }
-                    }
+        static T* gen_coefs_by_angle() {
+            static T* coefs = []{
+              if constexpr (A == 1 || B == 1) { // DFT matrix
+                T* result = new T[N * N];
+                for (std::size_t i = 0; i < N; i++) {
+                  for (std::size_t j = 0; j < N; j++) {
+                    const double angle = 
+                      NegTwoPI * static_cast<double>((i * j) % N) / static_cast<double>(N);
+                        result[i * N + j] = T{static_cast<float>(std::cos(angle)),
+                                              static_cast<float>(std::sin(angle))};
+                  }
                 }
                 return result;
+              } else { // Split Radix FFT Twiddle factors
+                T* result = new T[N];
+                for (std::size_t i = 0; i < N; i++) {
+                  const double angle = 
+                      NegTwoPI * static_cast<double>(i) / static_cast<double>(N);
+                  result[i] = T{static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
+                }
+                return result;
+              }
             }();
             return coefs;
         } 
-    };
+    }; 
 
     template <std::size_t N>
     struct FFTPlanBasic {
@@ -340,9 +561,10 @@ namespace FFT {
             // This function is in-place! the input is modified with the result.
             return;
         }
-    }; 
+    };
 
-    constexpr void wave_gen(std::complex<float> *time_domain, std::complex<float> *freq_domain,
+    template <typename T>
+    constexpr void wave_gen(T *time_domain, T *freq_domain,
         std::size_t N,
         unsigned int f = 1,
         unsigned int phase = 0,
@@ -350,45 +572,42 @@ namespace FFT {
         for (unsigned int i = 0; i < N; i++) {
             const float angle = static_cast<float>(TwoPI) * static_cast<float>((i * f) + phase)
                                   / static_cast<float>(N);
-            time_domain[i] += std::complex<float>{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
+            time_domain[i] += T{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
         }
         const float angle = static_cast<float>(TwoPI) * 
                                   (static_cast<float>(phase) / static_cast<float>(N));
-        freq_domain[f] += std::complex<float>{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
-    }
+        freq_domain[f] += T{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
+    } 
 
-    constexpr void wave_gen(float32x2_t *time_domain, float32x2_t *freq_domain,
-        std::size_t N,
-        unsigned int f = 1,
-        unsigned int phase = 0,
-        unsigned int amp = 1) {
-        for (unsigned int i = 0; i < N; i++) {
-            const float angle = static_cast<float>(TwoPI) * static_cast<float>((i * f) + phase)
-                                  / static_cast<float>(N);
-            time_domain[i] += float32x2_t{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
-        }
-        const float angle = static_cast<float>(TwoPI) * 
-                                  (static_cast<float>(phase) / static_cast<float>(N));
-        freq_domain[f] += float32x2_t{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
-    }
-
-    constexpr void wave_gen_lcg(std::complex<float> *time_domain, std::complex<float> *freq_domain,
-        std::size_t N) {
-        for (unsigned int i = 0; i < 13; i++) {
+    template <typename T>
+    constexpr void wave_gen_lcg(T *time_domain, T *freq_domain, unsigned int N) {
+        if (N < 13) {
+            if (N > 7) {
+                wave_gen(time_domain, freq_domain, N,
+                    7, 2, 1);
+            }
+            if (N > 5) {
+                wave_gen(time_domain, freq_domain, N,
+                    5, 2, 1);
+            }
+            if (N > 4) {
+                wave_gen(time_domain, freq_domain, N,
+                    4, 3, 2);
+            }
+            if (N > 3) {
+                wave_gen(time_domain, freq_domain, N,
+                    3, 2, 1);
+            }
             wave_gen(time_domain, freq_domain, N,
-                ((i + 7) * 3) % N,
-                ((i + 5) * 11) % N,
-                ((i + 11) * 13) % N);
-        }
-    }
-
-    constexpr void wave_gen_lcg(float32x2_t *time_domain, float32x2_t *freq_domain,
-        std::size_t N) {
-        for (unsigned int i = 0; i < 13; i++) {
-            wave_gen(time_domain, freq_domain, N,
-                ((i + 7) * 3) % N,
-                ((i + 5) * 11) % N,
-                ((i + 11) * 13) % N);
+                1, 1, 1);
+            return;
+        } else {
+            for (unsigned int i = 0; i < 13; i++) {
+                wave_gen(time_domain, freq_domain, N,
+                    ((i + 7) * 3) % N,
+                    ((i + 5) * 11) % N,
+                    ((i + 11) * 13) % N);
+            }
         }
     }
 }

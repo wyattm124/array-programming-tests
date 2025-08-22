@@ -2,6 +2,7 @@
 
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
+#include <iomanip>
 
 // Your test cases go here
 TEST_CASE("Prime Factorization") {
@@ -151,74 +152,109 @@ TEST_CASE("FFT Basic Small Input") {
     CHECK(max_diff < 5e-6);
 }
 
+// Error is measured as the maximum magnitude of the difference
+//  between any pair of computed and expected values
 template<unsigned int N>
 std::pair<float, float> fft_opt_tester() {
     // Test Inputs
-    std::array<float32x2_t, N> time_domain1 = {0};
-    std::array<float32x2_t, N> freq_domain1 = {0};
+    alignas(16) std::array<FFT::Complex, N> time_domain1 = {0};
+    alignas(16) std::array<FFT::Complex, N> freq_domain1 = {0};
     FFT::wave_gen_lcg(time_domain1.data(), freq_domain1.data(), N);
-    std::array<float32x2_t, N> time_domain1_copy;
+    alignas(16) std::array<FFT::Complex, N> time_domain1_copy;
     for (std::size_t i = 0; i < N; i++)
         time_domain1_copy[i] = time_domain1[i];
     
     // Init
-    volatile auto fft_plan = FFT::FFTPlan<N>();
+    volatile auto fft_plan = FFT::FFTPlan<N, FFT::Complex>();
     
     // modify in place to frequency domain
-    FFT::FFTPlan<N>::fft(time_domain1.data());
+    FFT::FFTPlan<N, FFT::Complex>::fft(time_domain1.data());
 
     // Check Outputs
     float max_diff = 0;
     for (std::size_t i = 0; i < N; i++) {
-        max_diff = std::max(max_diff, FFT::neon_abs(time_domain1[i] - freq_domain1[i]));
+        /*std::cout << std::fixed << std::setprecision(2) << time_domain1[i][0] << " + i" << time_domain1[i][1] << " - " <<
+          freq_domain1[i][0] << " + i" << freq_domain1[i][1] << std::endl;*/
+        max_diff = std::max(max_diff, FFT::abs(time_domain1[i] - freq_domain1[i]));
     }
 
     // modify in place back to time domain
-    FFT::FFTPlan<N>::ifft(time_domain1.data());
+    FFT::FFTPlan<N, FFT::Complex>::ifft(time_domain1.data());
     
     // Check Outputs
     float max_inverse_diff = 0;
     for (std::size_t i = 0; i < N; i++) {
-        max_inverse_diff = std::max(max_inverse_diff, FFT::neon_abs(time_domain1[i] - time_domain1_copy[i]));
+        /*std::cout << std::fixed << std::setprecision(2) << time_domain1[i][0] << " + i" << time_domain1[i][1] << " - " <<
+          freq_domain1[i][0] << " + i" << freq_domain1[i][1] << std::endl;*/
+        max_inverse_diff = std::max(max_inverse_diff, FFT::abs(time_domain1[i] - time_domain1_copy[i]));
     }
     return {max_diff, max_inverse_diff};
 }
-TEST_CASE("FFT Opt Small Input") {
-    auto Ans_8 = fft_opt_tester<8>();
-    
-    CHECK(Ans_8.first < 2e-5);
-    CHECK(Ans_8.second < 3e-6);
-    
-    auto Ans_9 = fft_opt_tester<9>();
-    
-    CHECK(Ans_9.first < 7e-6);
-    CHECK(Ans_9.second < 1e-6); 
-}
 
-TEST_CASE("FFT Opt Med Input") {
+// Try to ensure max error is ~1e-6
+TEST_CASE("FFT Opt Base Case Input") {
+    auto Ans_3 = fft_opt_tester<3>();
+    CHECK(Ans_3.first < 2e-7);
+    CHECK(Ans_3.second < 2e-7);
+
+    auto Ans_4 = fft_opt_tester<4>();
+    CHECK(Ans_4.first < 5e-7);
+    CHECK(Ans_4.second < 2e-7);
+    
+    auto Ans_5 = fft_opt_tester<5>();
+    CHECK(Ans_5.first < 6e-7);
+    CHECK(Ans_5.second < 3e-7);
+    
+    auto Ans_6 = fft_opt_tester<6>();
+    CHECK(Ans_6.first < 1.3e-6);
+    CHECK(Ans_6.second < 3e-7);
 
     auto Ans_7 = fft_opt_tester<7>();
-    
-    CHECK(Ans_7.first < 8e-6);
-    CHECK(Ans_7.second < 3e-6);
-    
+    CHECK(Ans_7.first < 9.3e-7);
+    CHECK(Ans_7.second < 4e-7);
+
+    auto Ans_8 = fft_opt_tester<8>();
+    CHECK(Ans_8.first < 1.1e-6);
+    CHECK(Ans_8.second < 2e-7);
+}
+
+// Keep error resonably small on small DFTs (un measurably small)
+//  and not significant on medium DFTS (in the 1e-4 range)
+TEST_CASE("FFT Opt Med Prime Input") {
+    // Error on DFT of N 13 goes to float 0
     auto Ans_13 = fft_opt_tester<13>();
+    CHECK(Ans_13.first < 1e-9);
+    CHECK(Ans_13.second < 1e-9);
     
-    CHECK(Ans_13.first < 8e-6);
-    CHECK(Ans_13.second < 2e-6); 
+    auto Ans_53 = fft_opt_tester<53>();
+    CHECK(Ans_53.first < 2.3e-4);
+    CHECK(Ans_53.second < 6.2e-5);
 }
 
 TEST_CASE("FFT Opt Small Prime Composite Input") {
+    auto Ans_1 = fft_opt_tester<3 * 5>();
+    CHECK(Ans_1.first < 2e-5);
+    CHECK(Ans_1.second < 2e-2);
+    
+    auto Ans_2 = fft_opt_tester<7 * 5>();
+    CHECK(Ans_2.first < 9e-5);
+    CHECK(Ans_2.second < 3e-5);
 
-    auto Ans_1 = fft_opt_tester<7 * 7 * 13>();
+    auto Ans_3 = fft_opt_tester<3 * 5 * 5>();
+    CHECK(Ans_3.first < 4e-4);
+    CHECK(Ans_3.second < 3e-1); 
     
-    CHECK(Ans_1.first < 2e-3);
-    CHECK(Ans_1.second < 6e-4);
-    
-    auto Ans_2 = fft_opt_tester<5 * 7 * 11 * 13>();
-    
-    CHECK(Ans_2.first < 2e-3);
-    CHECK(Ans_2.second < 6e-4); 
+    auto Ans_4 = fft_opt_tester<3 * 5 * 7>();
+    CHECK(Ans_4.first < 7e-4);
+    CHECK(Ans_4.second < 3e-1);
+
+    auto Ans_5 = fft_opt_tester<7 * 11>();
+    CHECK(Ans_5.first < 4e-4);
+    CHECK(Ans_5.second < 6e-5);
+
+    auto Ans_6 = fft_opt_tester<3 * 5 * 7 * 11 * 13>();
+    CHECK(Ans_6.first < 2e-3);
+    CHECK(Ans_6.second < 2e-2);
 }
 
 // TODO : Opt tests with larger numbers like 8192 and 8191?

@@ -1,3 +1,4 @@
+#include "complex_types.hpp"
 #include "fft.hpp"
 
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
@@ -118,8 +119,10 @@ TEST_CASE("FFT Basic Small Input") {
         time_domain2_copy[i] = time_domain2[i];
 
     // modify in place to frequency domain
-    FFT::FFTPlanBasic<N>::fft(time_domain1.data());
-    FFT::FFTPlanBasic<M>::fft(time_domain2.data());
+    FFT::FFTPlan<N, FFT::StdComplexWrap<float>>::fft(
+        static_cast<FFT::StdComplexWrap<float>*>(time_domain1.data()));
+    FFT::FFTPlan<M, FFT::StdComplexWrap<float>>::fft(
+        static_cast<FFT::StdComplexWrap<float>*>(time_domain2.data()));
 
     // Check Outputs
     float max_diff = 0;
@@ -135,8 +138,10 @@ TEST_CASE("FFT Basic Small Input") {
     CHECK(max_diff < 6e-6);
 
     // modify in place back to time domain
-    FFT::FFTPlanBasic<N>::ifft(time_domain1.data());
-    FFT::FFTPlanBasic<M>::ifft(time_domain2.data());
+    FFT::FFTPlan<N, FFT::StdComplexWrap<float>>::ifft(
+        static_cast<FFT::StdComplexWrap<float>*>(time_domain1.data()));
+    FFT::FFTPlan<M, FFT::StdComplexWrap<float>>::ifft(
+        static_cast<FFT::StdComplexWrap<float>*>(time_domain2.data()));
     
     // Check Outputs
     max_diff = 0;

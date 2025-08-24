@@ -1,7 +1,7 @@
 #include "fft.hpp"
-#include <fftw3.h>
+#include "complex_types.hpp"
 #include <benchmark/benchmark.h>
-
+#include <fftw3.h>
 
 class Powerof2Fixture : public benchmark::Fixture {
 protected:
@@ -43,11 +43,11 @@ protected:
 };
 
 // Power of 2 benchmarks
-BENCHMARK_DEFINE_F(Powerof2Fixture, Basic)(benchmark::State& state) {
+/*BENCHMARK_DEFINE_F(Powerof2Fixture, Basic)(benchmark::State& state) {
     for (auto _ : state) {
         FFT::FFTPlanBasic<Powerof2Fixture::N>::fft(time_domain1.data());
     }
-}
+}*/
 
 BENCHMARK_DEFINE_F(Powerof2Fixture, Neon)(benchmark::State& state) {
     // Need to Copy Data to Correct Type
@@ -59,10 +59,10 @@ BENCHMARK_DEFINE_F(Powerof2Fixture, Neon)(benchmark::State& state) {
     }
 
     // Make sure to do initialization
-    volatile auto fft_plan_n = FFT::FFTPlan<Powerof2Fixture::N>();
+    volatile auto fft_plan_n = FFT::FFTPlan<Powerof2Fixture::N, float32x2_t>();
 
     for (auto _ : state) {
-        FFT::FFTPlan<Powerof2Fixture::N>::fft(temp_time_domain1.data());
+        FFT::FFTPlan<Powerof2Fixture::N, float32x2_t>::fft(temp_time_domain1.data());
     }
 }
 
@@ -111,11 +111,11 @@ BENCHMARK_DEFINE_F(Powerof2Fixture, FFTW)(benchmark::State& state) {
 }
 
 // Mersenne Prime benchmarks
-BENCHMARK_DEFINE_F(MersennePrimeFixture, Basic)(benchmark::State& state) {
+/*BENCHMARK_DEFINE_F(MersennePrimeFixture, Basic)(benchmark::State& state) {
     for (auto _ : state) {
         FFT::FFTPlanBasic<MersennePrimeFixture::N>::fft(time_domain1.data());
     }
-}
+}*/
 
 BENCHMARK_DEFINE_F(MersennePrimeFixture, Neon)(benchmark::State& state) {
     // Need to Copy Data to Correct Type
@@ -127,10 +127,10 @@ BENCHMARK_DEFINE_F(MersennePrimeFixture, Neon)(benchmark::State& state) {
     }
 
     // Make sure to do initialization
-    volatile auto fft_plan_n = FFT::FFTPlan<MersennePrimeFixture::N>();
+    volatile auto fft_plan_n = FFT::FFTPlan<MersennePrimeFixture::N, float32x2_t>();
 
     for (auto _ : state) {
-        FFT::FFTPlan<MersennePrimeFixture::N>::fft(temp_time_domain1.data());
+        FFT::FFTPlan<MersennePrimeFixture::N, float32x2_t>::fft(temp_time_domain1.data());
     }
 }
 
@@ -179,11 +179,11 @@ BENCHMARK_DEFINE_F(MersennePrimeFixture, FFTW)(benchmark::State& state) {
 }
 
 // Small Prime benchmarks
-BENCHMARK_DEFINE_F(SmallPrimeFixture, Basic)(benchmark::State& state) {
+/*BENCHMARK_DEFINE_F(SmallPrimeFixture, Basic)(benchmark::State& state) {
     for (auto _ : state) {
         FFT::FFTPlanBasic<SmallPrimeFixture::N>::fft(time_domain1.data());
     }
-}
+}*/
 
 BENCHMARK_DEFINE_F(SmallPrimeFixture, Neon)(benchmark::State& state) {
     // Need to Copy Data to Correct Type
@@ -195,10 +195,10 @@ BENCHMARK_DEFINE_F(SmallPrimeFixture, Neon)(benchmark::State& state) {
     }
 
     // Make sure to do initialization
-    volatile auto fft_plan_n = FFT::FFTPlan<SmallPrimeFixture::N>();
+    volatile auto fft_plan_n = FFT::FFTPlan<SmallPrimeFixture::N, float32x2_t>();
 
     for (auto _ : state) {
-        FFT::FFTPlan<SmallPrimeFixture::N>::fft(temp_time_domain1.data());
+        FFT::FFTPlan<SmallPrimeFixture::N, float32x2_t>::fft(temp_time_domain1.data());
     }
 }
 
@@ -247,19 +247,19 @@ BENCHMARK_DEFINE_F(SmallPrimeFixture, FFTW)(benchmark::State& state) {
 }
 
 // Power of 2 Benchmarks
-BENCHMARK_REGISTER_F(Powerof2Fixture, Basic);
+//BENCHMARK_REGISTER_F(Powerof2Fixture, Basic);
 BENCHMARK_REGISTER_F(Powerof2Fixture, Neon);
 BENCHMARK_REGISTER_F(Powerof2Fixture, CustomComplex);
 BENCHMARK_REGISTER_F(Powerof2Fixture, FFTW);
 
 // Mersenne Prime Benchmarks
-BENCHMARK_REGISTER_F(MersennePrimeFixture, Basic);
+//BENCHMARK_REGISTER_F(MersennePrimeFixture, Basic);
 BENCHMARK_REGISTER_F(MersennePrimeFixture, Neon);
 BENCHMARK_REGISTER_F(MersennePrimeFixture, CustomComplex);
 BENCHMARK_REGISTER_F(MersennePrimeFixture, FFTW);
 
 // Small Prime Benchmarks
-BENCHMARK_REGISTER_F(SmallPrimeFixture, Basic);
+//BENCHMARK_REGISTER_F(SmallPrimeFixture, Basic);
 BENCHMARK_REGISTER_F(SmallPrimeFixture, Neon);
 BENCHMARK_REGISTER_F(SmallPrimeFixture, CustomComplex);
 BENCHMARK_REGISTER_F(SmallPrimeFixture, FFTW);

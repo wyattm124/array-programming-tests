@@ -3,7 +3,8 @@
 
 constexpr unsigned int N = 8;
 
-// does not add accuracy past 8 digits of precision
+// Does not add accuracy for Complex float calculations to 
+//   approximate roots past 8 digits of precision
 int main() {
     for (int i = 0; i < N; i++) {
         std::cout << std::fixed << std::setprecision(12) << std::cos((2 * M_PI * i) / N) 

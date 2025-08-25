@@ -1,81 +1,23 @@
+#pragma once
+
 #include <cmath>
-#include <cstddef>
-#include <memory>
 #include <array>
-#include <complex>
-#include <iostream>
-#include <iomanip>
-#include <arm_neon.h>
 
 #include "prime_factor.hpp"
 
 /// TODO:
-/// (2) - implement Bluestiens's for numbers that do not decompse into these factors
-/// (3) - implement a top level search for best number to pad an input to for FFT
+/// (1) - May want base cases for 9 and 10
+/// (2) - Implement Rader's algorithm for small prime numbers, especially 11, 13, 17 and 19
+/// (3) - Implement Bluestiens's for numbers that do not decompse into any hand written cases
+/// (4) - Implement a top level search to appropriately pad an input to a number if needed
+///   and factor it into the best radices
 
 // For LLVM MCA Analysis
 #define MCA_START __asm volatile("# LLVM-MCA-BEGIN");
 #define MCA_END __asm volatile("# LLVM-MCA-END");
 
 namespace FFT {
-    struct alignas(8) Complex {
-        float data[2];
-        
-        // Accessors
-        float& operator[](size_t i) { return data[i]; }
-        const float& operator[](size_t i) const { return data[i]; }
-        
-        // Default constructor
-        constexpr Complex() : data{0, 0} {}
-        
-        // Initialization constructor
-        constexpr Complex(float r, float i = 0.0f) : data{r, i} {}
-        
-        // Operators
-        friend constexpr Complex operator+(const Complex& a, const Complex& b) noexcept {
-            return {a[0] + b[0], a[1] + b[1]};
-        }
-        
-        friend constexpr Complex operator-(const Complex& a, const Complex& b) noexcept {
-            return {a[0] - b[0], a[1] - b[1]};
-        }
-
-        friend constexpr Complex operator*(const Complex& a, float b) noexcept {
-            return {a[0] * b, a[1] * b};
-        }
-        
-        friend constexpr Complex operator*(const Complex& a, const Complex& b) noexcept {
-            return {a[0] * b[0], a[1] * b[1]};
-        }
-
-        Complex& operator+=(const Complex& b) noexcept {
-            data[0] += b[0];
-            data[1] += b[1];
-            return *this;
-        }
-        
-        Complex& operator/=(float b) noexcept {
-            data[0] /= b;
-            data[1] /= b;
-            return *this;
-        }
-        
-        // Implicit conversion from std::complex for compatibility
-        //Complex(const std::complex<float>& c) : data{c.real(), c.imag()} {}
-        //operator std::complex<float>() const { return {data[0], data[1]}; }
-    };
-
-    // These are the factors from highest priority to lowest priority, with
-    //  with the highest priority at the lowest index
-    constexpr unsigned int factors[] = {8, 4, 6};
-    constexpr unsigned int get_best_factor(unsigned int N) {
-        for (auto factor : factors) {
-            if (N % factor == 0)
-                return factor;
-        }
-        return prime_factor::get_prime_factor(N);
-    }
-
+    /// Operations used by FFT
     template <typename T>
     inline float abs(const T &__restrict__ a) noexcept {
         return std::sqrt(a[0]*a[0] + a[1]*a[1]);
@@ -98,6 +40,17 @@ namespace FFT {
     template <typename T>
     inline T mult_conj(const T &__restrict__ a, const T &__restrict__ b_conj) noexcept {
         return {a[0] * b_conj[0] + a[1] * b_conj[1], a[1] * b_conj[0] - a[0] * b_conj[1]};
+    }
+
+    // These are the factors from highest priority to lowest priority, with
+    //  with the highest priority at the lowest index
+    constexpr unsigned int factors[] = {8, 4, 6};
+    constexpr unsigned int get_best_factor(unsigned int N) {
+        for (auto factor : factors) {
+            if (N % factor == 0)
+                return factor;
+        }
+        return prime_factor::get_prime_factor(N);
     } 
 
     // For DFT Transpositions
@@ -105,12 +58,13 @@ namespace FFT {
     void DFT_binner(T *__restrict__ in, T *__restrict__ out) noexcept {
         // Base case
         if constexpr (A == 1 || B == 1) {
-            std::copy(in, in + A * B, out);
+            for (unsigned int i = 0; i < A * B; i++)
+                out[i] = in[i];
             return;
         }
 
         // This will create B DFTs of size A
-        for (std::size_t n = 0; n < A * B; n++) {
+        for (unsigned int n = 0; n < A * B; n++) {
             const auto i = n % B;
             const auto j = n / B;
             const auto k = i * A + j;
@@ -123,8 +77,8 @@ namespace FFT {
     //  the memory savings.
 
     // This will create B DFTs of size A
-    template <unsigned int A, unsigned int B>
-    void DFT_binner_inplace(float32x2_t *__restrict__ data) {
+    template <unsigned int A, unsigned int B, typename T>
+    void DFT_binner_inplace(T *__restrict__ data) {
         // Base case
         if constexpr (A == 1 || B == 1) {
             return;
@@ -147,7 +101,7 @@ namespace FFT {
         std::size_t earliest_unmoved_index = 0;
         std::size_t curr_index = 0;
         std::size_t next_index = get_next_index(curr_index);
-        float32x2_t temp_val = data[curr_index];
+        T temp_val = data[curr_index];
         while (earliest_unmoved_index < (A * B)) {
             // Complete one loop of transpositions
             while (!flip_tracker[next_index]) {
@@ -174,39 +128,42 @@ namespace FFT {
     constexpr double TwoPI = 2.0 * M_PI;
     constexpr double NegTwoPI = -TwoPI; 
 
-    template <unsigned int N, typename T = float32x2_t>
+    template <unsigned int N, typename T>
     class FFTPlan {
+        private:
+        static constexpr auto m = mult<T>;
+        static constexpr auto mc = mult_conj<T>;
         public:
         static constexpr unsigned int A = get_best_factor(N);
-        static constexpr unsigned int B = N / A;
+        static constexpr unsigned int B = N / A; 
 
         FFTPlan() {
             // Ensure the coeffs are calculated
             volatile auto* coefs = gen_coefs_by_angle();
         }
 
-        // TODO : may want to shift the result so that DC component is at the center,
-        //  but without this shift the FFT and IFFT are inverses of each other
-        static void fft(T *__restrict__ data) noexcept {
-            T* aligned_data = std::assume_aligned<16>(data);
-            fft_recurse(aligned_data);
+        // NOTE : The result is not shifted so the DC component is still at index 0,
+        //  and the FFT and IFFT are inverses of each other
+        static void fft(T *__restrict__ in, T *__restrict__ out) noexcept {
+            fft_recurse(in, out);
 
             // Normalize
             for (std::size_t i = 0; i < N; i++)
-                data[i] /= static_cast<float>(N);
+                out[i] /= static_cast<float>(N);
 
             return;
         }
 
-        static void ifft(T *__restrict__ data) noexcept {
-            T* aligned_data = std::assume_aligned<16>(data);
+        // The Inverse DFT matrix is the same as the DFT matrix but with the corresponding
+        //  factors conjugated.
+        static void ifft(T *__restrict__ in, T *__restrict__ out) noexcept {
             for (std::size_t i = 0; i < N; i++)
-                aligned_data[i] = conj(aligned_data[i]);
+                in[i] = conj(in[i]);
 
-            fft_recurse(aligned_data);
+            fft_recurse(in, out);
 
             for (std::size_t i = 0; i < N; i++)
-                aligned_data[i] = conj(aligned_data[i]);
+                out[i] = conj(out[i]);
 
             // NOTE : if the fft is normalized, the ifft does not need to be normalized
             //  to keep the ifft the exact inverse operation of the fft.
@@ -214,133 +171,131 @@ namespace FFT {
             return;
         }
         
-        // In-place Mixed Radix Cooley Tukey FFT
-        static void fft_recurse(T *__restrict__ data) noexcept {
-            T* aligned_data = std::assume_aligned<16>(data);
-
+        // Mixed Radix Cooley Tukey FFT
+        static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
             MCA_START
             // Base case + direct DFT cases
             if constexpr (N == 1) {
-                // Do nothing, just return
+                out[0] = in[0];
             } else if constexpr (N == 2) {
-                const auto temp = aligned_data[0] + aligned_data[1];
-                aligned_data[1] = aligned_data[0] - aligned_data[1];
-                aligned_data[0] = temp;
+                const auto x_0 = in[0];
+                const auto x_1 = in[1];
+                out[0] = x_0 + x_1;
+                out[1] = x_0 - x_1;
             } else if constexpr (N == 3) {
                 // TODO : write all math explicitly? See if that gives a speed boost.
                 static constexpr T third_root = {-0.5f, -0.866025403784f};
-                const T x_0 = aligned_data[0];
-                const T x_1 = aligned_data[1];
-                const T x_2 = aligned_data[2];
-                aligned_data[0] = x_0 + x_1 + x_2;
-                aligned_data[1] = x_0 + mult(x_1, third_root) + mult_conj(x_2, third_root);
-                aligned_data[2] = x_0 + mult_conj(x_1, third_root) + mult(x_2, third_root);
+                const T x_0 = in[0];
+                const T x_1 = in[1];
+                const T x_2 = in[2];
+                out[0] = x_0 + x_1 + x_2;
+                out[1] = x_0 + m(x_1, third_root) + mc(x_2, third_root);
+                out[2] = x_0 + mc(x_1, third_root) + m(x_2, third_root);
             } else if constexpr (N == 4) {
-                const T x_0 = aligned_data[0];
-                const T x_1 = aligned_data[1];
-                const T x_2 = aligned_data[2];
-                const T x_3 = aligned_data[3];
+                const T x_0 = in[0];
+                const T x_1 = in[1];
+                const T x_2 = in[2];
+                const T x_3 = in[3];
                 { // First do evens
                     const T a = x_0 + x_2;
                     const T b = x_1 + x_3;
-                    aligned_data[0] = a + b;
-                    aligned_data[2] = a - b;
+                    out[0] = a + b;
+                    out[2] = a - b;
                 }
                 { // Then do odds
                     const T a = x_0 - x_2;
                     const T temp_b = x_1 - x_3;
                     const T b = {temp_b[1], -temp_b[0]};
-                    aligned_data[1] = a + b;
-                    aligned_data[3] = a - b;
+                    out[1] = a + b;
+                    out[3] = a - b;
                 }
             } else if constexpr (N == 5) {
                 static constexpr T root_1 = {0.309016994375, -0.951056516295};
                 static constexpr T root_2 = {-0.809016994375, -0.587785252292};
-                const T x_0 = aligned_data[0];
-                const T x_1 = aligned_data[1];
-                const T x_2 = aligned_data[2];
-                const T x_3 = aligned_data[3];
-                const T x_4 = aligned_data[4];
-                aligned_data[0] = x_0 + x_1 + x_2 + x_3 + x_4;
-                aligned_data[1] = x_0 + mult(x_1, root_1) + mult(x_2, root_2) +
-                               mult_conj(x_3, root_2) + mult_conj(x_4, root_1);
-                aligned_data[2] = x_0 + mult(x_1, root_2) + mult_conj(x_2, root_1) +
-                               mult(x_3, root_1) + mult_conj(x_4, root_2);
-                aligned_data[3] = x_0 + mult_conj(x_1, root_2) + mult(x_2, root_1) +
-                               mult_conj(x_3, root_1) + mult(x_4, root_2);
-                aligned_data[4] = x_0 + mult_conj(x_1, root_1) + mult_conj(x_2, root_2) +
-                               mult(x_3, root_2) + mult(x_4, root_1);
+                const T x_0 = in[0];
+                const T x_1 = in[1];
+                const T x_2 = in[2];
+                const T x_3 = in[3];
+                const T x_4 = in[4];
+                out[0] = x_0 + x_1 + x_2 + x_3 + x_4;
+                out[1] = x_0 + m(x_1, root_1) + m(x_2, root_2) +
+                               mc(x_3, root_2) + mc(x_4, root_1);
+                out[2] = x_0 + m(x_1, root_2) + mc(x_2, root_1) +
+                               m(x_3, root_1) + mc(x_4, root_2);
+                out[3] = x_0 + mc(x_1, root_2) + m(x_2, root_1) +
+                               mc(x_3, root_1) + m(x_4, root_2);
+                out[4] = x_0 + mc(x_1, root_1) + mc(x_2, root_2) +
+                               m(x_3, root_2) + m(x_4, root_1);
             } else if constexpr (N == 6) {
                 static constexpr float r_a = 0.5f;
                 static constexpr float r_b = -0.866025403784f;
-                const T x_0 = aligned_data[0];
-                const T x_1 = aligned_data[1];
-                const T x_2 = aligned_data[2];
-                const T x_3 = aligned_data[3];
-                const T x_4 = aligned_data[4];
-                const T x_5 = aligned_data[5];
+                const T x_0 = in[0];
+                const T x_1 = in[1];
+                const T x_2 = in[2];
+                const T x_3 = in[3];
+                const T x_4 = in[4];
+                const T x_5 = in[5];
                 {
                     const T a = x_0 + x_2 + x_4;
                     const T b = x_1 + x_3 + x_5;
-                    aligned_data[0] = a + b;
-                    aligned_data[3] = a - b;
+                    out[0] = a + b;
+                    out[3] = a - b;
                 }
                 {
                     const T a = x_0 - x_3;
                     const T b = x_1 - x_4;
                     const T c = x_2 - x_5;
-                    aligned_data[1] = a + mult(b, T{r_a, r_b}) + mult(c, T{-r_a, r_b});
-                    aligned_data[5] = a + mult(b, T{r_a, -r_b}) + mult(c, T{-r_a, -r_b});
+                    out[1] = a + m(b, T{r_a, r_b}) + m(c, T{-r_a, r_b});
+                    out[5] = a + m(b, T{r_a, -r_b}) + m(c, T{-r_a, -r_b});
                 }
                 {
                     const T a = x_0 + x_3;
                     const T b = x_1 + x_4;
                     const T c = x_2 + x_5;
-                    aligned_data[2] = a + mult(b, T{-r_a, r_b}) + mult(c, T{-r_a, -r_b});
-                    aligned_data[4] = a + mult(b, T{-r_a, -r_b}) + mult(c, T{-r_a, r_b});
+                    out[2] = a + m(b, T{-r_a, r_b}) + m(c, T{-r_a, -r_b});
+                    out[4] = a + m(b, T{-r_a, -r_b}) + m(c, T{-r_a, r_b});
                 }
             } else if constexpr (N == 7) {
-                // TODO : to make this comparable with FFTW, I would need to use Rader's algorithm
                 static constexpr T r_1 = {0.623489801859, -0.781831482468};
                 static constexpr T r_2 = {-0.222520933956, -0.974927912182};
                 static constexpr T r_3 = {-0.900968867902, -0.433883739118};
-                const T x_0 = aligned_data[0];
-                const T x_1 = aligned_data[1];
-                const T x_2 = aligned_data[2];
-                const T x_3 = aligned_data[3];
-                const T x_4 = aligned_data[4];
-                const T x_5 = aligned_data[5];
-                const T x_6 = aligned_data[6];
-                aligned_data[0] = x_0 + x_1 + x_2 + x_3 + x_4 + x_5 + x_6;
-                aligned_data[1] = x_0 + mult(x_1, r_1) + mult(x_2, r_2) + mult(x_3, r_3) +
-                  mult_conj(x_4, r_3) + mult_conj(x_5, r_2) + mult_conj(x_6, r_1);
-                aligned_data[2] = x_0 + mult(x_1, r_2) + mult_conj(x_2, r_3) + 
-                  mult_conj(x_3, r_1) + mult(x_4, r_1) + mult(x_5, r_3) +
-                  mult_conj(x_6, r_2);
-                aligned_data[3] = x_0 + mult(x_1, r_3) + mult_conj(x_2, r_1) + mult(x_3, r_2) +
-                  mult_conj(x_4, r_2) + mult(x_5, r_1) + mult_conj(x_6, r_3); 
-                aligned_data[4] = x_0 + mult_conj(x_1, r_3) + mult(x_2, r_1) + 
-                  mult_conj(x_3, r_2) + mult(x_4, r_2) + mult_conj(x_5, r_1) +
-                  mult(x_6, r_3);
-                aligned_data[5] = x_0 + mult_conj(x_1, r_2) + mult(x_2, r_3) + mult(x_3, r_1) +
-                  mult_conj(x_4, r_1) + mult_conj(x_5, r_3) + mult(x_6, r_2);
-                aligned_data[6] = x_0 + mult_conj(x_1, r_1) + mult_conj(x_2, r_2) +
-                  mult_conj(x_3, r_3) + mult(x_4, r_3) + mult(x_5, r_2) +
-                  mult(x_6, r_1);
+                const T x_0 = in[0];
+                const T x_1 = in[1];
+                const T x_2 = in[2];
+                const T x_3 = in[3];
+                const T x_4 = in[4];
+                const T x_5 = in[5];
+                const T x_6 = in[6];
+                out[0] = x_0 + x_1 + x_2 + x_3 + x_4 + x_5 + x_6;
+                out[1] = x_0 + m(x_1, r_1) + m(x_2, r_2) + m(x_3, r_3) +
+                  mc(x_4, r_3) + mc(x_5, r_2) + mc(x_6, r_1);
+                out[2] = x_0 + m(x_1, r_2) + mc(x_2, r_3) + 
+                  mc(x_3, r_1) + m(x_4, r_1) + m(x_5, r_3) +
+                  mc(x_6, r_2);
+                out[3] = x_0 + m(x_1, r_3) + mc(x_2, r_1) + m(x_3, r_2) +
+                  mc(x_4, r_2) + m(x_5, r_1) + mc(x_6, r_3); 
+                out[4] = x_0 + mc(x_1, r_3) + m(x_2, r_1) + 
+                  mc(x_3, r_2) + m(x_4, r_2) + mc(x_5, r_1) +
+                  m(x_6, r_3);
+                out[5] = x_0 + mc(x_1, r_2) + m(x_2, r_3) + m(x_3, r_1) +
+                  mc(x_4, r_1) + mc(x_5, r_3) + m(x_6, r_2);
+                out[6] = x_0 + mc(x_1, r_1) + mc(x_2, r_2) +
+                  mc(x_3, r_3) + m(x_4, r_3) + m(x_5, r_2) +
+                  m(x_6, r_1);
             } else if constexpr (N == 8) {
                 static constexpr float c = 0.707106781187f;
                 static constexpr T eighth_root = {c,c};
                 static constexpr auto forth_root = [](T x){
                     return T{x[1], -x[0]};
                 };
-                const T x_0 = aligned_data[0];
-                const T x_1 = aligned_data[1];
-                const T x_2 = aligned_data[2];
-                const T x_3 = aligned_data[3];
-                const T x_4 = aligned_data[4];
-                const T x_5 = aligned_data[5];
-                const T x_6 = aligned_data[6];
-                const T x_7 = aligned_data[7];
+                const T x_0 = in[0];
+                const T x_1 = in[1];
+                const T x_2 = in[2];
+                const T x_3 = in[3];
+                const T x_4 = in[4];
+                const T x_5 = in[5];
+                const T x_6 = in[6];
+                const T x_7 = in[7];
                 {
                     const T a_0 = x_0 + x_4;
                     const T a_1 = x_2 + x_6;
@@ -349,15 +304,15 @@ namespace FFT {
                     { // 0 and 4 index, based on 2 DFTs of size 4 + shifted for index 2 and 6
                         const T a = a_0 + a_1;
                         const T b = b_0 + b_1;
-                        aligned_data[0] = a + b;
-                        aligned_data[4] = a - b;
+                        out[0] = a + b;
+                        out[4] = a - b;
                     }
                     { // 2 and 6 index, based on 2 DFTs of size 4 + shifted for index 0 and 4
                         const T a = a_0 - a_1;
                         const T b_p = b_0 - b_1;
                         const T b = forth_root(b_p);
-                        aligned_data[2] = a + b;
-                        aligned_data[6] = a - b;
+                        out[2] = a + b;
+                        out[6] = a - b;
                     }
                 }
                 {
@@ -368,67 +323,64 @@ namespace FFT {
                         const T b_0_p = x_1 - x_5;
                         const T b_0 = forth_root(b_0_p);
                         const T b_1 = x_3 - x_7;
-                        aligned_data[3] = (a_0 - a_1) + mult_conj(b_1 + b_0, eighth_root);
-                        aligned_data[5] = (a_0 + a_1) + mult(b_1 - b_0, eighth_root);
+                        out[3] = (a_0 - a_1) + mc(b_1 + b_0, eighth_root);
+                        out[5] = (a_0 + a_1) + m(b_1 - b_0, eighth_root);
                     }
                     { // DFT for index 1 and 7
                         const T b_0 = x_1 - x_5;
                         const T b_1_p = x_3 - x_7;
                         const T b_1 = forth_root(b_1_p);
-                        aligned_data[1] = (a_0 + a_1) + mult_conj(b_0 + b_1, eighth_root);
-                        aligned_data[7] = (a_0 - a_1) + mult(b_0 - b_1, eighth_root); 
+                        out[1] = (a_0 + a_1) + mc(b_0 + b_1, eighth_root);
+                        out[7] = (a_0 - a_1) + m(b_0 - b_1, eighth_root); 
                     }
                 }
             } else if constexpr (A == 1 || B == 1) { // Do the full DFT
                 auto dft_matrix = gen_coefs_by_angle();
                 std::array<T, N> temp_data;
 
-                // Do a full DFT
                 for (unsigned int i = 0; i < N; i++) {
                     T temp_ans = {0, 0};
                     for (unsigned int j = 0; j < N; j++) {
-                        temp_ans += mult(data[j], dft_matrix[i * N + j]);
+                        temp_ans += m(in[j], dft_matrix[i * N + j]);
                     }
-                    temp_data[i] = temp_ans;
+                    out[i] = temp_ans;
                 }
-
-                for (unsigned int i = 0; i < N; i++)
-                    data[i] = temp_data[i];
-            } else { // Do a mixed radix FFT
+            } else { // Do a recursive step of a mixed radix FFT
+                // TODO : may not want to put this on the stack for large FFT steps
                 alignas(16) std::array<T, N> temp_data;
 
                 // Transpose Input Data around the first radix
-                DFT_binner<A, B>(aligned_data, temp_data.data());
+                DFT_binner<A, B>(in, temp_data.data());
  
                 // Do the A sized FFT on each bin
                 for (unsigned int i = 0; i < B; i++)
-                    FFTPlan<A, T>::fft_recurse(temp_data.data() + (i * A));
+                    FFTPlan<A, T>::fft_recurse(temp_data.data() + (i * A), out + (i * A));
 
                 // Multiply by Cooley Tukey Twiddle factors
                 T *twiddle_factors = gen_coefs_by_angle();
                 for (unsigned int i = 0; i < N; i++) {
-                    aligned_data[i] = mult(temp_data[i], twiddle_factors[((i / A) * (i % A)) % N]);
+                    temp_data[i] = m(out[i], twiddle_factors[((i / A) * (i % A)) % N]);
                 }
 
                 // Transpose around the second radix
-                DFT_binner<B, A>(aligned_data, temp_data.data());
+                DFT_binner<B, A>(temp_data.data(), out);
 
                 // Do the B sized FFT on each bin
                 for (unsigned int i = 0; i < A; i++)
-                    FFTPlan<B, T>::fft_recurse(temp_data.data() + (i * B));
+                    FFTPlan<B, T>::fft_recurse(out + (i * B), temp_data.data() + (i * B));
 
-                DFT_binner<A, B>(temp_data.data(), aligned_data);
+                // Transpose result back in order
+                DFT_binner<A, B>(temp_data.data(), out);
             }
             MCA_END
 
-            // This function is in-place! the input is modified with the result.
             return;
         } 
          
         private:
         // NOTE : coeffs with either method can be calculated as they are needed in the loops that
         //   calculate the actual DFT components, but calculating them ahead of time reduces
-        //   done in the DFT itself for the angle based method, and grealy reduces loop
+        //   work done in the DFT itself for the angle based method, and grealy reduces loop
         //   dependencies for the multiplication based method.
         // static float32x2_t* coefs;
         
@@ -453,11 +405,11 @@ namespace FFT {
                         T k_factor = {1, 0};
                         for (std::size_t k = 0; k < A; k++) {
                             result[i * A * A + j * A + k] = k_factor;
-                            k_factor = mult(k_factor, j_factor);
+                            k_factor = m(k_factor, j_factor);
                         }
-                        j_factor = mult(j_factor, big_inc);
+                        j_factor = m(j_factor, big_inc);
                     }
-                    i_factor = mult(i_factor, small_inc);
+                    i_factor = m(i_factor, small_inc);
                 }
                 return result;
             }();
@@ -467,7 +419,9 @@ namespace FFT {
         static T gen_factor_by_angle(std::size_t i, std::size_t j, std::size_t k) {
             const double angle = NegTwoPI * static_cast<double>(i * (k + j * B)) / static_cast<double>(N);
             return {static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
-        };
+        }
+
+        // TODO : use a cleaner way to hold coefs at class rather than object level
         static T* gen_coefs_by_angle() {
             static T* coefs = []{
               if constexpr (A == 1 || B == 1) { // DFT matrix
@@ -495,74 +449,6 @@ namespace FFT {
         } 
     }; 
 
-    template <std::size_t N>
-    struct FFTPlanBasic {
-        static constexpr auto A = prime_factor::get_prime_factor(N);
-        static constexpr auto B = N / A;
-
-        // TODO : may want to shift the result so that DC component is at the center,
-        //  but without this shift the FFT and IFFT are inverses of each other
-        static void fft(std::complex<float> *data) {
-            fft_recurse(data);
-
-            // Normalize
-            for (std::size_t i = 0; i < N; i++)
-                data[i] /= static_cast<float>(N);
-
-            return;
-        } 
-
-        // Inverse FFT is just FFT on conj of input, and then conj of output
-        static void ifft(std::complex<float> *data) {
-            for (std::size_t i = 0; i < N; i++)
-                data[i] = std::conj(data[i]);
-
-            fft_recurse(data);
-
-            for (std::size_t i = 0; i < N; i++)
-                data[i] = std::conj(data[i]);
-
-            // NOTE : if the fft is normalized, the ifft does not need to be normalized
-            //  to keep the ifft the exact inverse operation of the fft.
-
-            return;
-        } 
-
-        // In-place Mixed Radix Cooley Tukey FFT
-        static void fft_recurse(std::complex<float> *data) {
-            // Base case
-            if constexpr (A < 2) {
-                return;
-            }
-
-            // Transpose Input Data around the radix
-            std::array<std::complex<float>, N> temp;
-            DFT_binner<B, A>(data, temp.data());
-
-            // Recursively apply fft to each bin
-            for (std::size_t i = 0; i < A; i++)
-                FFTPlanBasic<B>::fft_recurse(temp.data() + (i * B));
-
-            // Combine recursive results
-            constexpr auto get_factor = [](std::size_t i, std::size_t j, std::size_t k) -> std::complex<float> {
-                const float angle = static_cast<float>(NegTwoPI * static_cast<double>(i * (k + j * B)) / static_cast<double>(N));
-                return {std::cosf(angle), std::sinf(angle)};
-            };
-            
-            for (std::size_t i = 0; i < B; i++) {
-                // Recursively calculate strided results in temp location
-                for (std::size_t j = 0; j < A; j++) {
-                    data[i + (j * B)] = {0, 0};
-                    for (std::size_t k = 0; k < A; k++) {
-                        data[i + (j * B)] += temp[i + (k * B)] * get_factor(k, j, i);
-                    }
-                }
-            }
-            // This function is in-place! the input is modified with the result.
-            return;
-        }
-    };
-
     template <typename T>
     constexpr void wave_gen(T *time_domain, T *freq_domain,
         std::size_t N,
@@ -582,24 +468,11 @@ namespace FFT {
     template <typename T>
     constexpr void wave_gen_lcg(T *time_domain, T *freq_domain, unsigned int N) {
         if (N < 13) {
-            if (N > 7) {
-                wave_gen(time_domain, freq_domain, N,
-                    7, 2, 1);
-            }
-            if (N > 5) {
-                wave_gen(time_domain, freq_domain, N,
-                    5, 2, 1);
-            }
-            if (N > 4) {
-                wave_gen(time_domain, freq_domain, N,
-                    4, 3, 2);
-            }
-            if (N > 3) {
-                wave_gen(time_domain, freq_domain, N,
-                    3, 2, 1);
-            }
-            wave_gen(time_domain, freq_domain, N,
-                1, 1, 1);
+            if (N > 7) wave_gen(time_domain, freq_domain, N, 7, 2, 1);
+            if (N > 5) wave_gen(time_domain, freq_domain, N, 5, 2, 1);
+            if (N > 4) wave_gen(time_domain, freq_domain, N, 4, 3, 2);
+            if (N > 3) wave_gen(time_domain, freq_domain, N, 3, 2, 1);
+            wave_gen(time_domain, freq_domain, N, 1, 1, 1);
             return;
         } else {
             for (unsigned int i = 0; i < 13; i++) {

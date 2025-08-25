@@ -1,4 +1,4 @@
-#include "cheb_approx.hpp"
+#include "../tools/cheb_approx.hpp"
 
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>

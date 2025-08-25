@@ -55,17 +55,17 @@
           export CC=clang
           export CXX=clang++
           build_fft () {
-            clang++ -std=c++23 -O3 fft_tests.cpp -o ../bin/fft_tests && \
-            clang++ -std=c++23 -O3 fft_bench.cpp -lbenchmark -pthread -lfftw3f -o ../bin/fft_bench && \
-            clang++ -std=c++23 -O3 fft_profile.cpp -lprofiler -o ../bin/fft_profile
+            clang++ -std=c++23 -O3 test/fft_tests.cpp -lfftw3f -o bin/fft_tests && \
+            clang++ -std=c++23 -O3 bench/fft_bench.cpp bench/fft_comp_unit.cpp -lbenchmark -pthread -lfftw3f -o bin/fft_bench && \
+            clang++ -std=c++23 -O3 bench/fft_profile.cpp bench/fft_comp_unit.cpp -lprofiler -o bin/fft_profile
           }
           mca_timeline () {
-            clang++ -std=c++23 -O3 fft_profile.cpp -S -o - | llvm-mca -skip-unsupported-instructions=lack-sched --timeline
+            clang++ -std=c++23 -O3 bench/fft_profile.cpp -S -o - | llvm-mca -skip-unsupported-instructions=lack-sched --timeline
           }
           build_tools () {
-            clang++ -std=c++23 -O2 cheb_tests.cpp -o ../bin/cheb_tests && \
-            clang++ -std=c++23 -O2 smooth_dist.cpp -o ../bin/smooth_dist && \
-            clang++ -std=c++23 -O2 roots_printer.cpp -o ../bin/roots_printer
+            clang++ -std=c++23 -O2 test/cheb_tests.cpp -o bin/cheb_tests && \
+            clang++ -std=c++23 -O2 tools/smooth_dist.cpp -o bin/smooth_dist && \
+            clang++ -std=c++23 -O2 tools/roots_printer.cpp -o bin/roots_printer
           }
         '';
       };

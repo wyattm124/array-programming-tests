@@ -1,10 +1,12 @@
 #pragma once
 
+#include <array>
+
 namespace prime_factor {
     // Just get the first smallest prime factor of N
     // NOTE : this is key step in the induction for the mixed-radix-Cooley-Tukey FFT algorithm
-    constexpr std::size_t get_prime_factor(std::size_t N) {
-        for (std::size_t i = 2; i * i <= N; i++) {
+    constexpr unsigned int get_prime_factor(unsigned int N) {
+        for (unsigned int i = 2; i * i <= N; i++) {
             if (N % i == 0) {
                 return i;
             }
@@ -13,9 +15,9 @@ namespace prime_factor {
     }
 
     // NOTE : This is only for testing the get_prime_factor function
-    constexpr std::array<std::size_t, 64> prime_factorization(std::size_t n) {
+    constexpr std::array<unsigned int, 64> prime_factorization(unsigned int n) {
         // Take care of "degenerate" edge cases
-        std::array<std::size_t, 64> factors = {0};
+        std::array<unsigned int, 64> factors = {0};
         if (n == 0) {
             return factors;
         } else if (n == 1) {
@@ -24,8 +26,8 @@ namespace prime_factor {
         }
 
         // For all other cases, do the usual loop
-        std::size_t factor_count = 0;
-        std::size_t p = get_prime_factor(n);
+        unsigned int factor_count = 0;
+        unsigned int p = get_prime_factor(n);
         while (p > 1) {
             while (n % p == 0) {
                 factors[factor_count++] = p;

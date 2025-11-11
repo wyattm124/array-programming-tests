@@ -349,25 +349,43 @@ namespace FFT {
                 // TODO : may not want to put this on the stack for large FFT steps
                 alignas(16) std::array<T, N> temp_data;
 
-                // Transpose Input Data around the first radix
-                DFT_binner<A, B>(in, temp_data.data());
- 
-                // Do the A sized FFT on each bin
-                for (unsigned int i = 0; i < B; i++)
-                    FFTPlan<A, T>::fft_recurse(temp_data.data() + (i * A), out + (i * A));
+                for (unsigned int i = 0; i < B; i++) {
+                    alignas(16) std::array<T, A> workspace;
 
-                // Multiply by Cooley Tukey Twiddle factors
-                T *twiddle_factors = gen_coefs_by_angle();
-                for (unsigned int i = 0; i < N; i++) {
-                    temp_data[i] = m(out[i], twiddle_factors[((i / A) * (i % A)) % N]);
+                    /* Transpose input data around the first radix A
+                     *  to create B bins of size A.
+                     * 
+                     * We create a single bin and compute its FFT before
+                     *  moving onto the next bin to improve cache locality.
+                     */
+                    for (unsigned int j = 0; j < A; j++) {
+                        workspace[j] = in[i + j * B];
+                    }
+
+                    // Do the A sized FFT on the current bin
+                    FFTPlan<A, T>::fft_recurse(workspace.data(), out + (i * A));
                 }
 
-                // Transpose around the second radix
-                DFT_binner<B, A>(temp_data.data(), out);
+                for (unsigned int i = 0; i < A; i++) {
+                    // Cooley Tukey twiddle factors
+                    T *twiddle_factors = gen_coefs_by_angle();
 
-                // Do the B sized FFT on each bin
-                for (unsigned int i = 0; i < A; i++)
-                    FFTPlan<B, T>::fft_recurse(out + (i * B), temp_data.data() + (i * B));
+                    alignas(16) std::array<T, B> workspace;
+                 
+                    /* Same tactic as above to transpose input data around
+                     *  second radix B.
+                     * 
+                     * Here is different than above only in tha before using
+                     *  this input for the recursive FFT, we make sure to
+                     *  adjust it by the appropriate twiddle factor.
+                     */
+                    for (unsigned int j = 0; j < B; j++) {
+                        workspace[j] = m(out[i + j * A], twiddle_factors[i * j]);
+                    }
+
+                    // Do the B sized FFT on the current bin
+                    FFTPlan<B, T>::fft_recurse(workspace.data(), temp_data.data() + (i * B));
+                }
 
                 // Transpose result back in order
                 DFT_binner<A, B>(temp_data.data(), out);

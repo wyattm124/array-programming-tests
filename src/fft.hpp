@@ -64,11 +64,10 @@ namespace FFT {
         }
 
         // This will create B DFTs of size A
-        for (unsigned int n = 0; n < A * B; n++) {
-            const auto i = n % B;
-            const auto j = n / B;
-            const auto k = i * A + j;
-            out[k] = in[n];
+        for (unsigned int i = 0; i < B; i++) {
+            for (unsigned int j = 0; j < A; j++) {
+                out[i * A + j] = in[j * B + i];
+            }
         }
         return;
     }

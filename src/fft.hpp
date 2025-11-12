@@ -70,59 +70,7 @@ namespace FFT {
             }
         }
         return;
-    }
-    
-    // NOTE : although this algorithm is in-place, all the added computation is not worth
-    //  the memory savings.
-
-    // This will create B DFTs of size A
-    template <unsigned int A, unsigned int B, typename T>
-    void DFT_binner_inplace(T *__restrict__ data) {
-        // Base case
-        if constexpr (A == 1 || B == 1) {
-            return;
-        }
-
-        // Have an array to track which elements have already been placed
-        std::array<bool, (A * B)> flip_tracker = {false};
-
-        // Given an index n, return the index it should be moved to
-        constexpr auto get_next_index = [=](std::size_t n) -> std::size_t {
-            const auto i = n % B;
-            const auto j = n / B;
-            return i * A + j;
-        };
-
-        // Because of basic group theory, if N / p is not prime, we will
-        //  have at least one loop of transposition that does not span all items.
-        //  so as we whack-a-mole replace elements, we may need to find a new
-        //  loop of elements to start replacing.
-        std::size_t earliest_unmoved_index = 0;
-        std::size_t curr_index = 0;
-        std::size_t next_index = get_next_index(curr_index);
-        T temp_val = data[curr_index];
-        while (earliest_unmoved_index < (A * B)) {
-            // Complete one loop of transpositions
-            while (!flip_tracker[next_index]) {
-                flip_tracker[next_index] = true;
-                if (curr_index != next_index) { // avoid swap with self
-                    std::swap(temp_val, data[next_index]);
-                    curr_index = next_index;
-                    next_index = get_next_index(curr_index);
-                }
-            }
-
-            // Update earliest unmoved index if necessary
-            while (earliest_unmoved_index < (A * B) && flip_tracker[earliest_unmoved_index])
-                earliest_unmoved_index++;
-
-            // Update bookkeeping for next loop of transpositions
-            curr_index = earliest_unmoved_index;
-            next_index = get_next_index(curr_index);
-            temp_val = data[curr_index];
-        }
-        return; 
-    }
+    } 
     
     constexpr double TwoPI = 2.0 * M_PI;
     constexpr double NegTwoPI = -TwoPI; 

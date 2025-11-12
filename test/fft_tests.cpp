@@ -44,35 +44,6 @@ TEST_CASE("Prime Factorization") {
     CHECK(prime_factor::prime_factorization(13 * 17 * 19) == std::array<unsigned int, 64>{13, 17, 19});
 }
 
-TEST_CASE("FFT Radix Transposition Extra Memory") {
-    // Test Inputs
-    std::array<float32x2_t, 8> data1 = {{{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}}};
-    std::array<float32x2_t, 9> data2 = {{{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}, {6, 0}, {7, 0}, {8, 0}}};
-    std::array<float32x2_t, 8> out1;
-    std::array<float32x2_t, 9> out2;
-
-    // Test Answers
-    std::array<float32x2_t, 8> answer1 = {{{0, 0}, {2, 0}, {4, 0}, {6, 0}, {1, 0}, {3, 0}, {5, 0}, {7, 0}}};
-    std::array<float32x2_t, 9> answer2 = {{{0, 0}, {3, 0}, {6, 0}, {1, 0}, {4, 0}, {7, 0}, {2, 0}, {5, 0}, {8, 0}}};
-    
-    // modify in place
-    FFT::DFT_binner<4, 2>(data1.data(), out1.data());
-    FFT::DFT_binner<3, 3>(data2.data(), out2.data());
-    
-    // Check Outputs
-    bool cmp = true;
-    for (std::size_t i = 0; i < 8; i++) {
-        cmp &= (out1[i][0] == answer1[i][0] && out1[i][1] == answer1[i][1]);
-    }
-    CHECK(cmp);
-    
-    cmp = true;
-    for (std::size_t i = 0; i < 9; i++) {
-        cmp &= (out2[i][0] == answer2[i][0] && out2[i][1] == answer2[i][1]);
-    }
-    CHECK(cmp);
-}
-
 TEST_CASE("FFT Basic Small Input") {
     constexpr size_t N = 8;
     constexpr size_t M = 9;

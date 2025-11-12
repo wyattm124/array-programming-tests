@@ -52,25 +52,6 @@ namespace FFT {
         }
         return prime_factor::get_prime_factor(N);
     } 
-
-    // For DFT Transpositions
-    template <unsigned int A, unsigned int B, typename T>
-    void DFT_binner(T *__restrict__ in, T *__restrict__ out) noexcept {
-        // Base case
-        if constexpr (A == 1 || B == 1) {
-            for (unsigned int i = 0; i < A * B; i++)
-                out[i] = in[i];
-            return;
-        }
-
-        // This will create B DFTs of size A
-        for (unsigned int i = 0; i < B; i++) {
-            for (unsigned int j = 0; j < A; j++) {
-                out[i * A + j] = in[j * B + i];
-            }
-        }
-        return;
-    } 
     
     constexpr double TwoPI = 2.0 * M_PI;
     constexpr double NegTwoPI = -TwoPI; 
@@ -335,7 +316,11 @@ namespace FFT {
                 }
 
                 // Transpose result back in order
-                DFT_binner<A, B>(temp_data.data(), out);
+                for (unsigned int i = 0; i < B; i++) {
+                    for (unsigned int j = 0; j < A; j++) {
+                        out[i * A + j] = temp_data[j * B + i];
+                    }
+                }
             }
             MCA_END
 

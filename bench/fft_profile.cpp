@@ -11,10 +11,10 @@ int main() {
     std::array<FFT::Complex, N> freq_domain = {0};
     FFT::wave_gen_lcg(time_domain.data(), freq_domain_ans.data(), N);
 
-    volatile auto fft_plan_n = FFT::FFTPlan<N, FFT::Complex>();
+    FFT::FFTPlan<FFT::Complex>::Init<N>();
     //ProfilerStart("fft_mid_prime");
     for (std::size_t i = 0; i < 100000000; i++) {
-        FFT::FFTPlan<N, FFT::Complex>::fft(time_domain.data(), freq_domain.data());
+        FFT::FFTPlan<FFT::Complex>::fft<N>(time_domain.data(), freq_domain.data());
     }
     //ProfilerStop();
 }

@@ -37,16 +37,13 @@
     in rec {
       devShells.default = pkgs.mkShell {
         buildInputs = [
-          pkgs.clang
           pkgs.git
           doctest
           googlebench
-          pkgs.libcxx
           pkgs.fftwFloat
           pkgs.gperftools
           pkgs.graphviz
           pkgs.gv
-          pkgs.llvmPackages_latest.llvm
         ];
 
         # With -O3 the compiler optimizes out some recusrsive fft transposition steps

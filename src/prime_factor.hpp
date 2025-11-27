@@ -14,6 +14,9 @@ namespace prime_factor {
         return N;
     }
 
+    template<unsigned int n>
+    concept Prime = (get_prime_factor(n) == n);
+
     // NOTE : This is only for testing the get_prime_factor function
     constexpr std::array<unsigned int, 64> prime_factorization(unsigned int n) {
         // Take care of "degenerate" edge cases

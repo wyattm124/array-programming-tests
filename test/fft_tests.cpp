@@ -65,11 +65,14 @@ TEST_CASE("FFT Basic Small Input") {
     for (std::size_t i = 0; i < M; i++)
         time_domain2_copy[i] = time_domain2[i];
 
+    FFT::FFTPlan<FFT::StdComplexWrap<float>>::Init<N>();
+    FFT::FFTPlan<FFT::StdComplexWrap<float>>::Init<M>();
+
     // modify in place to frequency domain
-    FFT::FFTPlan<N, FFT::StdComplexWrap<float>>::fft(
+    FFT::FFTPlan<FFT::StdComplexWrap<float>>::fft<N>(
         static_cast<FFT::StdComplexWrap<float>*>(time_domain1.data()),
         static_cast<FFT::StdComplexWrap<float>*>(resp.data()));
-    FFT::FFTPlan<M, FFT::StdComplexWrap<float>>::fft(
+    FFT::FFTPlan<FFT::StdComplexWrap<float>>::fft<M>(
         static_cast<FFT::StdComplexWrap<float>*>(time_domain2.data()),
         static_cast<FFT::StdComplexWrap<float>*>(resp2.data()));
 
@@ -87,10 +90,10 @@ TEST_CASE("FFT Basic Small Input") {
     CHECK(max_diff < 6e-6);
 
     // modify in place back to time domain
-    FFT::FFTPlan<N, FFT::StdComplexWrap<float>>::ifft(
+    FFT::FFTPlan<FFT::StdComplexWrap<float>>::ifft<N>(
         static_cast<FFT::StdComplexWrap<float>*>(resp.data()),
         static_cast<FFT::StdComplexWrap<float>*>(time_domain1.data()));
-    FFT::FFTPlan<M, FFT::StdComplexWrap<float>>::ifft(
+    FFT::FFTPlan<FFT::StdComplexWrap<float>>::ifft<M>(
         static_cast<FFT::StdComplexWrap<float>*>(resp2.data()),
         static_cast<FFT::StdComplexWrap<float>*>(time_domain2.data()));
     
@@ -122,10 +125,11 @@ std::pair<float, float> fft_opt_tester() {
         time_domain_copy[i] = time_domain[i];
     
     // Init
-    volatile auto fft_plan = FFT::FFTPlan<N, FFT::Complex>();
+
+    FFT::FFTPlan<FFT::StdComplexWrap<float>>::Init<N>();
     
     // modify in place to frequency domain
-    FFT::FFTPlan<N, FFT::Complex>::fft(time_domain.data(), resp.data());
+    FFT::FFTPlan<FFT::Complex>::fft<N>(time_domain.data(), resp.data());
 
     // Check Outputs
     float max_diff = 0;
@@ -136,7 +140,7 @@ std::pair<float, float> fft_opt_tester() {
     }
 
     // modify in place back to time domain
-    FFT::FFTPlan<N, FFT::Complex>::ifft(resp.data(), time_domain.data());
+    FFT::FFTPlan<FFT::Complex>::ifft<N>(resp.data(), time_domain.data());
     
     // Check Outputs
     float max_inverse_diff = 0;

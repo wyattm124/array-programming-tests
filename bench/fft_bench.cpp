@@ -111,10 +111,10 @@ void process_neon(benchmark::State& state, std::array<std::complex<float>, N>& t
     }
 
     // Make sure to do initialization
-    volatile auto fft_plan_n = FFT::FFTPlan<N, float32x2_t>();
+    FFT::FFTPlan<float32x2_t>::Init<N>();
 
     for (auto _ : state) {
-        FFT::FFTPlan<N, float32x2_t>::fft(temp_time_domain.data(), temp_freq_domain.data());
+        FFT::FFTPlan<float32x2_t>::fft<N>(temp_time_domain.data(), temp_freq_domain.data());
     }
 }
 
@@ -123,10 +123,10 @@ void process_stdcomplexwrap(benchmark::State& state, std::array<std::complex<flo
     std::array<FFT::StdComplexWrap<float>, N> temp_freq_domain;
 
     // Make sure to do initialization
-    volatile auto fft_plan_n = FFT::FFTPlan<N, FFT::StdComplexWrap<float>>();
+    FFT::FFTPlan<FFT::StdComplexWrap<float>>::Init<N>();
 
     for (auto _ : state) {
-        FFT::FFTPlan<N, FFT::StdComplexWrap<float>>::fft(
+        FFT::FFTPlan<FFT::StdComplexWrap<float>>::fft<N>(
             static_cast<FFT::StdComplexWrap<float>*>(time_domain.data()),
             temp_freq_domain.data()
         );
@@ -143,10 +143,10 @@ void process_customcomplex(benchmark::State& state, std::array<std::complex<floa
     }
 
     // Make sure to do initialization
-    volatile auto fft_plan_n = FFT::FFTPlan<N, FFT::Complex>();
+    FFT::FFTPlan<FFT::Complex>::Init<N>();
 
     for (auto _ : state) {
-        FFT::FFTPlan<N, FFT::Complex>::fft(temp_time_domain.data(), temp_freq_domain.data());
+        FFT::FFTPlan<FFT::Complex>::fft<N>(temp_time_domain.data(), temp_freq_domain.data());
     }
 }
 

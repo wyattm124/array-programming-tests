@@ -84,18 +84,31 @@ namespace FFT {
     /// FFT factor generation
     template<typename T>
     struct FFTFactorGen {
-        // For this type parameter, these are the factors, from highest priority to
+        // For this type parameter, these are the preferred factors, from highest priority to
         //  lowest priority, to create each layer of the FFT.
-        static constexpr unsigned int factors[] = {8, 4, 6};
+        static constexpr unsigned int preferred_factors[] = {8, 4, 6};
+
+        // Check if N is one of the preferred factors
+        static constexpr bool is_preferred_factor(unsigned int N) {
+            for (auto factor : preferred_factors) {
+                if (N == factor)
+                    return true;
+            }
+            return false;
+        }
 
         // Given an input of size N, return the FFT bin sizes of the next
         //  layer of the FFT.
         static constexpr unsigned int get_best_factor(unsigned int N) {
-            for (auto factor : factors) {
+            for (auto factor : preferred_factors) {
                 if (N % factor == 0)
                     return factor;
             }
             return prime_factor::get_prime_factor(N);
+        }
+
+        static constexpr bool is_base_case(unsigned int n) {
+            return (prime_factor::get_prime_factor(n) == n) || is_preferred_factor(n);
         }
     };
 
@@ -136,7 +149,25 @@ namespace FFT {
         //  and the FFT and IFFT are inverses of each other
         template<unsigned int N>
         static void fft(T *__restrict__ in, T *__restrict__ out) noexcept {
-            FFTLayer<N>::fft_recurse(in, out);
+            if constexpr (FFTFactorGen<T>::is_base_case(N)) {
+                FFTLayer<N>::fft_recurse(in, out);
+            } else {
+                alignas(16) std::array<T, N> workspace;
+                constexpr unsigned int A = FFTFactorGen<T>::get_best_factor(N);
+                constexpr unsigned int B = N / A;
+                for (unsigned int i = 0; i < B; i++) {
+                    /* Transpose input data around the first radix A
+                     *  to create B bins of size A.
+                     * 
+                     * We create a single bin and compute its FFT before
+                     *  moving onto the next bin to improve cache locality.
+                     */
+                    for (unsigned int j = 0; j < A; j++) {
+                        workspace[i * A + j] = in[i + j * B];
+                    }
+                }
+                FFTLayer<N>::fft_recurse(workspace.data(), out);
+            }
 
             // Normalize
             for (std::size_t i = 0; i < N; i++)
@@ -152,7 +183,25 @@ namespace FFT {
             for (std::size_t i = 0; i < N; i++)
                 in[i] = conj(in[i]);
 
-            FFTLayer<N>::fft_recurse(in, out);
+            if constexpr (FFTFactorGen<T>::is_base_case(N)) {
+                FFTLayer<N>::fft_recurse(in, out);
+            } else {
+                alignas(16) std::array<T, N> workspace;
+                constexpr unsigned int A = FFTFactorGen<T>::get_best_factor(N);
+                constexpr unsigned int B = N / A;
+                for (unsigned int i = 0; i < B; i++) {
+                    /* Transpose input data around the first radix A
+                     *  to create B bins of size A.
+                     * 
+                     * We create a single bin and compute its FFT before
+                     *  moving onto the next bin to improve cache locality.
+                     */
+                    for (unsigned int j = 0; j < A; j++) {
+                        workspace[i * A + j] = in[i + j * B];
+                    }
+                }
+                FFTLayer<N>::fft_recurse(workspace.data(), out);
+            }
 
             for (std::size_t i = 0; i < N; i++)
                 out[i] = conj(out[i]);
@@ -182,24 +231,14 @@ namespace FFT {
                 alignas(16) std::array<T, N> temp_data;
 
                 for (unsigned int i = 0; i < B; i++) {
-                    alignas(16) std::array<T, A> workspace;
-
-                    /* Transpose input data around the first radix A
-                     *  to create B bins of size A.
-                     * 
-                     * We create a single bin and compute its FFT before
-                     *  moving onto the next bin to improve cache locality.
-                     */
-                    for (unsigned int j = 0; j < A; j++) {
-                        workspace[j] = in[i + j * B];
-                    }
-
                     // Do the A sized FFT on the current bin
-                    FFTLayer<A>::fft_recurse(workspace.data(), out + (i * A));
+                    FFTLayer<A>::fft_recurse(in + (i * A), out + (i * A));
                 }
 
                 for (unsigned int i = 0; i < A; i++) {
                     // Cooley Tukey twiddle factors
+                    // TODO - linearize access to twiddle factors!!!
+                    // TODO - ahead of time transpose of the input - try to allow pipelined multiply!
                     T *twiddle_factors = FFTPlan<T>::get_twiddle_factors_by_angle<N>();
 
                     alignas(16) std::array<T, B> workspace;
@@ -211,14 +250,37 @@ namespace FFT {
                      *  this input for the recursive FFT, we make sure to
                      *  adjust it by the appropriate twiddle factor.
                      */
-                    for (unsigned int j = 0; j < B; j++) {
-                        workspace[j] = m(out[i + j * A], twiddle_factors[i * j]);
+
+                    if constexpr (FFTFactorGen<T>::is_base_case(B)) {
+                        for (unsigned int j = 0; j < B; j++) {
+                            workspace[j] = m(out[i + j * A], twiddle_factors[i * j]);
+                        }
+
+                        // Do the B sized FFT on the current bin
+                        FFTLayer<B>::fft_recurse(workspace.data(), temp_data.data() + (i * B));
+                    } else {
+                        alignas(16) std::array<T, B> workspace_two;
+                        constexpr unsigned int C = FFTFactorGen<T>::get_best_factor(B);
+                        constexpr unsigned int D = B / C;
+                        constexpr unsigned int DA = D * A;
+
+                        for (unsigned int j = 0; j < D; j++) {
+                            /* Transpose input data around the first radix A
+                             *  to create B bins of size A.
+                             * 
+                             * We create a single bin and compute its FFT before
+                             *  moving onto the next bin to improve cache locality.
+                             */
+                            T * inner_workspace_two = workspace_two.data() + j * C;
+                            T * inner_out = out + i + j * A;
+                            T * inner_twiddle_factors = twiddle_factors + i * j;
+                            for (unsigned int k = 0; k < C; k++) {
+                                inner_workspace_two[k] = m(inner_out[k * DA], inner_twiddle_factors[i * k * D]);
+                            }
+                        }
+                        // Do the B sized FFT on the current bin
+                        FFTLayer<B>::fft_recurse(workspace_two.data(), temp_data.data() + (i * B)); 
                     }
-
-                    // TODO : fuse this ^ transpose with the transpose that comes below
-
-                    // Do the B sized FFT on the current bin
-                    FFTLayer<B>::fft_recurse(workspace.data(), temp_data.data() + (i * B));
                 }
 
                 // Transpose result back in order

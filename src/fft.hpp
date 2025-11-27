@@ -16,6 +16,9 @@
 #define MCA_START __asm volatile("# LLVM-MCA-BEGIN");
 #define MCA_END __asm volatile("# LLVM-MCA-END");
 
+// For Cache aligning
+#define MY_CACHE_LOAD_SIZE 64
+
 namespace FFT {
 
     /// Signal generation for generating an FFT input with the corresponding expected output.
@@ -179,10 +182,10 @@ namespace FFT {
 
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 // TODO : may not want to put this on the stack for large FFT steps
-                alignas(16) std::array<T, N> temp_data;
+                alignas(MY_CACHE_LOAD_SIZE) std::array<T, N> temp_data;
 
                 for (unsigned int i = 0; i < B; i++) {
-                    alignas(16) std::array<T, A> workspace;
+                    alignas(MY_CACHE_LOAD_SIZE) std::array<T, A> workspace;
 
                     /* Transpose input data around the first radix A
                      *  to create B bins of size A.
@@ -198,11 +201,12 @@ namespace FFT {
                     FFTLayer<A>::fft_recurse(workspace.data(), out + (i * A));
                 }
 
-                for (unsigned int i = 0; i < A; i++) {
-                    // Cooley Tukey twiddle factors
-                    T *twiddle_factors = FFTPlan<T>::get_twiddle_factors_by_angle<N>();
+                // Cooley Tukey twiddle factors
+                T *twiddle_factors = FFTPlan<T>::get_twiddle_factors_by_angle<N>();
 
-                    alignas(16) std::array<T, B> workspace;
+                for (unsigned int i = 0; i < A; i++) {
+
+                    alignas(MY_CACHE_LOAD_SIZE) std::array<T, B> workspace;
                  
                     /* Same tactic as above to transpose input data around
                      *  second radix B.
@@ -211,11 +215,11 @@ namespace FFT {
                      *  this input for the recursive FFT, we make sure to
                      *  adjust it by the appropriate twiddle factor.
                      */
+
+                    // TODO : Need to order twiddle factors so they are accessed linearly
                     for (unsigned int j = 0; j < B; j++) {
                         workspace[j] = m(out[i + j * A], twiddle_factors[i * j]);
                     }
-
-                    // TODO : fuse this ^ transpose with the transpose that comes below
 
                     // Do the B sized FFT on the current bin
                     FFTLayer<B>::fft_recurse(workspace.data(), temp_data.data() + (i * B));

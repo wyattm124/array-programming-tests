@@ -2,6 +2,8 @@
 
 #include <cmath>
 #include <array>
+#include <new>
+#include <memory>
 
 #include "prime_factor.hpp"
 
@@ -17,7 +19,7 @@
 #define MCA_END __asm volatile("# LLVM-MCA-END");
 
 // For Cache aligning
-#define MY_CACHE_LOAD_SIZE 64
+#define MY_CPU_LOAD_SIZE 64
 
 namespace FFT {
 
@@ -142,6 +144,8 @@ namespace FFT {
             FFTLayer<N>::fft_recurse(in, out);
 
             // Normalize
+            // FFTW does not normalize, so this loop should be commented
+            //  out for appropriate performance comparisons.
             for (std::size_t i = 0; i < N; i++)
                 out[i] /= static_cast<float>(N);
 
@@ -182,10 +186,11 @@ namespace FFT {
 
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 // TODO : may not want to put this on the stack for large FFT steps
-                alignas(MY_CACHE_LOAD_SIZE) std::array<T, N> temp_data;
+                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_data;
 
                 for (unsigned int i = 0; i < B; i++) {
-                    alignas(MY_CACHE_LOAD_SIZE) std::array<T, A> workspace;
+
+                    alignas(MY_CPU_LOAD_SIZE) std::array<T, A> workspace;
 
                     /* Transpose input data around the first radix A
                      *  to create B bins of size A.
@@ -202,11 +207,12 @@ namespace FFT {
                 }
 
                 // Cooley Tukey twiddle factors
-                T *twiddle_factors = FFTPlan<T>::get_twiddle_factors_by_angle<N>();
+                T *twiddle_factors = std::assume_aligned<MY_CPU_LOAD_SIZE>(
+                    FFTPlan<T>::get_twiddle_factors_by_angle<N>());
 
                 for (unsigned int i = 0; i < A; i++) {
 
-                    alignas(MY_CACHE_LOAD_SIZE) std::array<T, B> workspace;
+                    alignas(MY_CPU_LOAD_SIZE) std::array<T, B> workspace;
                  
                     /* Same tactic as above to transpose input data around
                      *  second radix B.
@@ -225,6 +231,7 @@ namespace FFT {
                     FFTLayer<B>::fft_recurse(workspace.data(), temp_data.data() + (i * B));
                 }
 
+                // TODO : fuse all these transposes at the end
                 // Transpose result back in order
                 for (unsigned int i = 0; i < B; i++) {
                     for (unsigned int j = 0; j < A; j++) {
@@ -246,7 +253,8 @@ namespace FFT {
             }
             
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
-                static T* dft_matrix = FFTPlan<T>::get_dft_matrix_by_angle<N>();
+                static T* dft_matrix = std::assume_aligned<MY_CPU_LOAD_SIZE>(
+                    FFTPlan<T>::get_dft_matrix_by_angle<N>());
 
                 for (unsigned int i = 0; i < N; i++) {
                     T temp_ans = {0, 0};
@@ -258,8 +266,7 @@ namespace FFT {
             }
         };
 
-        // Hand Written DFT cases serve as base cases for recursive Cooley Tookey
-        // Wrapped in FFTLayer specializations
+        // Hand written DFT cases serve as base cases for recursive Cooley Tookey
         template<>
         struct FFTLayer<1> {
             static constexpr unsigned int A = 1;
@@ -494,7 +501,7 @@ namespace FFT {
         // Coeffs calculated ahead of time trades memory for speed.
         //   Since Coeffs are roots of unity they could also be multiplied
         //   together within loops to generate them as needed, but this 
-        //   is emperically found to be not numerically stable enough.
+        //   has emperically been found to be not acceptably stable numerically.
         //   It is better to generate them with this angle based method for 
         //   numerical stablility. 
 
@@ -502,7 +509,8 @@ namespace FFT {
         template<unsigned int N>
         static T* get_dft_matrix_by_angle() {
             static T* coefs = []{
-                T* result = new T[N * N];
+                T* result = static_cast<T*>(
+                    ::operator new(sizeof(T) * N * N, std::align_val_t(MY_CPU_LOAD_SIZE)));
                 populate_dft_matrix_by_angle<T, N>(result); 
                 return result;
             }();
@@ -512,7 +520,8 @@ namespace FFT {
         template<unsigned int N>
         static T* get_twiddle_factors_by_angle() {
             static T* coefs = []{
-                T* result = new T[N];
+                T* result = static_cast<T*>(
+                    ::operator new(sizeof(T) * N, std::align_val_t(MY_CPU_LOAD_SIZE)));
                 populate_twiddle_factors_by_angle<T, N>(result); 
                 return result;
             }();

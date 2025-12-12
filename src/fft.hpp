@@ -119,11 +119,13 @@ namespace FFT {
         }
     }
     
-    template<typename T, unsigned int N>
+    template<typename T, unsigned int A, unsigned int B>
     void populate_twiddle_factors_by_angle(T* factors) {
-        for (std::size_t i = 0; i < N; i++) {
-            const double angle = NegTwoPI * static_cast<double>(i) / static_cast<double>(N);
-            factors[i] = T{static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
+        for (unsigned int i = 0; i < A; i++) {
+            for (unsigned int j = 0; j < B; j++) {
+                const double angle = NegTwoPI * static_cast<double>(i * j) / static_cast<double>(A * B);
+                factors[i * B + j] = T{static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
+            }
         }
     } 
     
@@ -179,7 +181,7 @@ namespace FFT {
 
             static void Init() {
                 // Ensure the coeffs are calculated
-                volatile T* coefs = FFTPlan<T>::get_twiddle_factors_by_angle<N>();
+                volatile T* coefs = FFTPlan<T>::get_twiddle_factors_by_angle<A, B>();
                 FFTLayer<A>::Init();
                 FFTLayer<B>::Init();
             }
@@ -208,7 +210,7 @@ namespace FFT {
 
                 // Cooley Tukey twiddle factors
                 T *twiddle_factors = std::assume_aligned<MY_CPU_LOAD_SIZE>(
-                    FFTPlan<T>::get_twiddle_factors_by_angle<N>());
+                    FFTPlan<T>::get_twiddle_factors_by_angle<A, B>());
 
                 for (unsigned int i = 0; i < A; i++) {
 
@@ -224,7 +226,7 @@ namespace FFT {
 
                     // TODO : Need to order twiddle factors so they are accessed linearly
                     for (unsigned int j = 0; j < B; j++) {
-                        workspace[j] = m(out[i + j * A], twiddle_factors[i * j]);
+                        workspace[j] = m(out[i + j * A], twiddle_factors[i * B + j]);
                     }
 
                     // Do the B sized FFT on the current bin
@@ -517,12 +519,12 @@ namespace FFT {
             return coefs;
         };
 
-        template<unsigned int N>
+        template<unsigned int A, unsigned int B>
         static T* get_twiddle_factors_by_angle() {
             static T* coefs = []{
                 T* result = static_cast<T*>(
-                    ::operator new(sizeof(T) * N, std::align_val_t(MY_CPU_LOAD_SIZE)));
-                populate_twiddle_factors_by_angle<T, N>(result); 
+                    ::operator new(sizeof(T) * A * B, std::align_val_t(MY_CPU_LOAD_SIZE)));
+                populate_twiddle_factors_by_angle<T, A, B>(result); 
                 return result;
             }();
             return coefs;

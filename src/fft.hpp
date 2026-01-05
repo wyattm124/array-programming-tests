@@ -143,13 +143,12 @@ namespace FFT {
         //  and the FFT and IFFT are inverses of each other
         template<unsigned int N>
         static void fft(T *__restrict__ in, T *__restrict__ out) noexcept {
-
             if constexpr (FFTLayer<N>::base_case) {
                 FFTLayer<N>::fft_recurse(in, out);
             } else {
-                std::array<T, N> temp_data;
+                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_data;
                 FFTLayer<N>::fft_recurse(in, temp_data.data());
-                FFTLayer<N>::transpose(temp_data.data(), out, 1);
+                transpose<N, 1>(temp_data.data(), out);
             }
 
             // Normalize
@@ -167,13 +166,13 @@ namespace FFT {
         static void ifft(T *__restrict__ in, T *__restrict__ out) noexcept {
             for (std::size_t i = 0; i < N; i++)
                 in[i] = conj(in[i]);
-
+            
             if constexpr (FFTLayer<N>::base_case) {
                 FFTLayer<N>::fft_recurse(in, out);
             } else {
-                std::array<T, N> temp_data;
+                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_data;
                 FFTLayer<N>::fft_recurse(in, temp_data.data());
-                FFTLayer<N>::transpose(temp_data.data(), out, 1);
+                transpose<N, 1>(temp_data.data(), out);
             }
 
             for (std::size_t i = 0; i < N; i++)
@@ -186,6 +185,22 @@ namespace FFT {
         }
 
         private:
+
+        template<unsigned int N, unsigned int S>
+        static void transpose(T *__restrict__ in, T *__restrict__ out) noexcept {
+            constexpr unsigned int A = FFTFactorGen<T>::get_best_factor(N);
+            constexpr unsigned int B = N / A;
+
+            // Transpose result back in order
+            for (unsigned int i = 0; i < A; i++) {
+                if constexpr (B == 1) {
+                    out[S * i] = in[i];
+                } else {
+                    transpose<B, A * S>(in + (B * i), out + (S * i));
+                }
+            }
+            return;
+        }
 
         template<unsigned int N>
         struct FFTLayer {
@@ -202,18 +217,6 @@ namespace FFT {
                 // First layer for A must be a non-recursive base case to make sure
                 //  recursive transpositions are done as expected
                 static_assert(FFTLayer<A>::base_case);
-            }
-
-            static void transpose(T *__restrict__ in, T *__restrict__ out, unsigned int skip) noexcept {
-                // Transpose result back in order
-                for (unsigned int i = 0; i < A; i++) {
-                    if constexpr (B == 1) {
-                        out[skip * i] = in[i];
-                    } else {
-                        FFTLayer<B>::transpose(in + (i * B), out + skip * i, A * skip);
-                    }
-                }
-                return;
             }
 
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
@@ -277,18 +280,6 @@ namespace FFT {
                 volatile T* coefs = FFTPlan<T>::get_dft_matrix_by_angle<N>();
             }
             
-            static void transpose(T *__restrict__ in, T *__restrict__ out, unsigned int skip) noexcept {
-                // Transpose result back in order
-                for (unsigned int i = 0; i < A; i++) {
-                    if constexpr (B == 1) {
-                        out[skip * i] = in[i];
-                    } else {
-                        FFTLayer<B>::transpose(in + (i * B), out + skip * i, A * skip);
-                    }
-                }
-                return;
-            }
-            
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static T* dft_matrix = std::assume_aligned<MY_CPU_LOAD_SIZE>(
                     FFTPlan<T>::get_dft_matrix_by_angle<N>());
@@ -313,13 +304,6 @@ namespace FFT {
                 // This init should never be called, as this FFTLayer should never be used
                 static_assert(false);
             }
-            
-            static void transpose(T *__restrict__ in, T *__restrict__ out) noexcept {
-                // This FFTLayer should never be used
-                static_assert(false);
-            }
-
-
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 // All base cases should avoid the need for this trivial specialization
                 static_assert(false);
@@ -332,17 +316,6 @@ namespace FFT {
             static constexpr unsigned int B = 1;
             static constexpr bool base_case = true;
             static void Init() {}
-            static void transpose(T *__restrict__ in, T *__restrict__ out, unsigned int skip) noexcept {
-                // Transpose result back in order
-                for (unsigned int i = 0; i < A; i++) {
-                    if constexpr (B == 1) {
-                        out[skip * i] = in[i];
-                    } else {
-                        FFTLayer<B>::transpose(in + (i * B), out + skip * i, A * skip);
-                    }
-                }
-                return;
-            }
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 const auto x_0 = in[0];
                 const auto x_1 = in[1];
@@ -358,17 +331,6 @@ namespace FFT {
             static constexpr unsigned int B = 1;
             static constexpr bool base_case = true;
             static void Init() {}
-            static void transpose(T *__restrict__ in, T *__restrict__ out, unsigned int skip) noexcept {
-                // Transpose result back in order
-                for (unsigned int i = 0; i < A; i++) {
-                    if constexpr (B == 1) {
-                        out[skip * i] = in[i];
-                    } else {
-                        FFTLayer<B>::transpose(in + (i * B), out + skip * i, A * skip);
-                    }
-                }
-                return;
-            }
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T third_root = {-0.5f, -0.866025403784f};
                 const T x_0 = in[0];
@@ -387,17 +349,6 @@ namespace FFT {
             static constexpr unsigned int B = 1;
             static constexpr bool base_case = true;
             static void Init() {}
-            static void transpose(T *__restrict__ in, T *__restrict__ out, unsigned int skip) noexcept {
-                // Transpose result back in order
-                for (unsigned int i = 0; i < A; i++) {
-                    if constexpr (B == 1) {
-                        out[skip * i] = in[i];
-                    } else {
-                        FFTLayer<B>::transpose(in + (i * B), out + skip * i, A * skip);
-                    }
-                }
-                return;
-            }
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 const T x_0 = in[0];
                 const T x_1 = in[1];
@@ -426,17 +377,6 @@ namespace FFT {
             static constexpr unsigned int B = 1;
             static constexpr bool base_case = true;
             static void Init() {}
-            static void transpose(T *__restrict__ in, T *__restrict__ out, unsigned int skip) noexcept {
-                // Transpose result back in order
-                for (unsigned int i = 0; i < A; i++) {
-                    if constexpr (B == 1) {
-                        out[skip * i] = in[i];
-                    } else {
-                        FFTLayer<B>::transpose(in + (i * B), out + skip * i, A * skip);
-                    }
-                }
-                return;
-            }
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T root_1 = {0.309016994375, -0.951056516295};
                 static constexpr T root_2 = {-0.809016994375, -0.587785252292};
@@ -464,17 +404,6 @@ namespace FFT {
             static constexpr unsigned int B = 1;
             static constexpr bool base_case = true;
             static void Init() {}
-            static void transpose(T *__restrict__ in, T *__restrict__ out, unsigned int skip) noexcept {
-                // Transpose result back in order
-                for (unsigned int i = 0; i < A; i++) {
-                    if constexpr (B == 1) {
-                        out[skip * i] = in[i];
-                    } else {
-                        FFTLayer<B>::transpose(in + (i * B), out + skip * i, A * skip);
-                    }
-                }
-                return;
-            }
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr float r_a = 0.5f;
                 static constexpr float r_b = -0.866025403784f;
@@ -514,17 +443,6 @@ namespace FFT {
             static constexpr unsigned int B = 1;
             static constexpr bool base_case = true;
             static void Init() {}
-            static void transpose(T *__restrict__ in, T *__restrict__ out, unsigned int skip) noexcept {
-                // Transpose result back in order
-                for (unsigned int i = 0; i < A; i++) {
-                    if constexpr (B == 1) {
-                        out[skip * i] = in[i];
-                    } else {
-                        FFTLayer<B>::transpose(in + (i * B), out + skip * i, A * skip);
-                    }
-                }
-                return;
-            }
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T r_1 = {0.623489801859, -0.781831482468};
                 static constexpr T r_2 = {-0.222520933956, -0.974927912182};
@@ -562,17 +480,6 @@ namespace FFT {
             static constexpr unsigned int B = 1;
             static constexpr bool base_case = true;
             static void Init() {}
-            static void transpose(T *__restrict__ in, T *__restrict__ out, unsigned int skip) noexcept {
-                // Transpose result back in order
-                for (unsigned int i = 0; i < A; i++) {
-                    if constexpr (B == 1) {
-                        out[skip * i] = in[i];
-                    } else {
-                        FFTLayer<B>::transpose(in + (i * B), out + skip * i, A * skip);
-                    }
-                }
-                return;
-            }
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr float c = 0.707106781187f;
                 static constexpr T eighth_root = {c,c};

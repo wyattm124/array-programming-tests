@@ -143,7 +143,13 @@ namespace FFT {
         //  and the FFT and IFFT are inverses of each other
         template<unsigned int N>
         static void fft(T *__restrict__ in, T *__restrict__ out) noexcept {
-            FFTLayer<N>::fft_recurse(in, out);
+            if constexpr (FFTLayer<N>::base_case) {
+                FFTLayer<N>::fft_recurse(in, out);
+            } else {
+                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_data;
+                FFTLayer<N>::fft_recurse(in, temp_data.data());
+                transpose<N, 1>(temp_data.data(), out);
+            }
 
             // Normalize
             // FFTW does not normalize, so this loop should be commented
@@ -160,8 +166,14 @@ namespace FFT {
         static void ifft(T *__restrict__ in, T *__restrict__ out) noexcept {
             for (std::size_t i = 0; i < N; i++)
                 in[i] = conj(in[i]);
-
-            FFTLayer<N>::fft_recurse(in, out);
+            
+            if constexpr (FFTLayer<N>::base_case) {
+                FFTLayer<N>::fft_recurse(in, out);
+            } else {
+                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_data;
+                FFTLayer<N>::fft_recurse(in, temp_data.data());
+                transpose<N, 1>(temp_data.data(), out);
+            }
 
             for (std::size_t i = 0; i < N; i++)
                 out[i] = conj(out[i]);
@@ -174,16 +186,37 @@ namespace FFT {
 
         private:
 
+        template<unsigned int N, unsigned int S>
+        static void transpose(T *__restrict__ in, T *__restrict__ out) noexcept {
+            constexpr unsigned int A = FFTFactorGen<T>::get_best_factor(N);
+            constexpr unsigned int B = N / A;
+
+            // Transpose result back in order
+            for (unsigned int i = 0; i < A; i++) {
+                if constexpr (B == 1) {
+                    out[S * i] = in[i];
+                } else {
+                    transpose<B, A * S>(in + (B * i), out + (S * i));
+                }
+            }
+            return;
+        }
+
         template<unsigned int N>
         struct FFTLayer {
             static constexpr unsigned int A = FFTFactorGen<T>::get_best_factor(N);
             static constexpr unsigned int B = N / A;
+            static constexpr bool base_case = false;
 
             static void Init() {
                 // Ensure the coeffs are calculated
                 volatile T* coefs = FFTPlan<T>::get_twiddle_factors_by_angle<A, B>();
                 FFTLayer<A>::Init();
                 FFTLayer<B>::Init();
+
+                // First layer for A must be a non-recursive base case to make sure
+                //  recursive transpositions are done as expected
+                static_assert(FFTLayer<A>::base_case);
             }
 
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
@@ -205,7 +238,7 @@ namespace FFT {
                     }
 
                     // Do the A sized FFT on the current bin
-                    FFTLayer<A>::fft_recurse(workspace.data(), out + (i * A));
+                    FFTLayer<A>::fft_recurse(workspace.data(), temp_data.data() + (i * A));
                 }
 
                 // Cooley Tukey twiddle factors
@@ -224,21 +257,12 @@ namespace FFT {
                      *  adjust it by the appropriate twiddle factor.
                      */
 
-                    // TODO : Need to order twiddle factors so they are accessed linearly
                     for (unsigned int j = 0; j < B; j++) {
-                        workspace[j] = m(out[i + j * A], twiddle_factors[i * B + j]);
+                        workspace[j] = m(temp_data[i + j * A], twiddle_factors[i * B + j]);
                     }
 
                     // Do the B sized FFT on the current bin
-                    FFTLayer<B>::fft_recurse(workspace.data(), temp_data.data() + (i * B));
-                }
-
-                // TODO : fuse all these transposes at the end
-                // Transpose result back in order
-                for (unsigned int i = 0; i < B; i++) {
-                    for (unsigned int j = 0; j < A; j++) {
-                        out[i * A + j] = temp_data[j * B + i];
-                    }
+                    FFTLayer<B>::fft_recurse(workspace.data(), out + (i * B));
                 }
             }
         };
@@ -249,6 +273,7 @@ namespace FFT {
         struct FFTLayer<N> {
             static constexpr unsigned int A = N;
             static constexpr unsigned int B = 1;
+            static constexpr bool base_case = true;
             static void Init() {
                 // Ensure the coeffs are calculated
                 volatile T* coefs = FFTPlan<T>::get_dft_matrix_by_angle<N>();
@@ -273,7 +298,11 @@ namespace FFT {
         struct FFTLayer<1> {
             static constexpr unsigned int A = 1;
             static constexpr unsigned int B = 1;
-            static void Init() {}
+            static constexpr bool base_case = true;
+            static void Init() {
+                // This init should never be called, as this FFTLayer should never be used
+                static_assert(false);
+            }
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 // All base cases should avoid the need for this trivial specialization
                 static_assert(false);
@@ -284,6 +313,7 @@ namespace FFT {
         struct FFTLayer<2> {
             static constexpr unsigned int A = 2;
             static constexpr unsigned int B = 1;
+            static constexpr bool base_case = true;
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 const auto x_0 = in[0];
@@ -298,6 +328,7 @@ namespace FFT {
         struct FFTLayer<3> {
             static constexpr unsigned int A = 3;
             static constexpr unsigned int B = 1;
+            static constexpr bool base_case = true;
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T third_root = {-0.5f, -0.866025403784f};
@@ -315,6 +346,7 @@ namespace FFT {
         struct FFTLayer<4> {
             static constexpr unsigned int A = 4;
             static constexpr unsigned int B = 1;
+            static constexpr bool base_case = true;
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 const T x_0 = in[0];
@@ -342,6 +374,7 @@ namespace FFT {
         struct FFTLayer<5> {
             static constexpr unsigned int A = 5;
             static constexpr unsigned int B = 1;
+            static constexpr bool base_case = true;
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T root_1 = {0.309016994375, -0.951056516295};
@@ -368,6 +401,7 @@ namespace FFT {
         struct FFTLayer<6> {
             static constexpr unsigned int A = 6;
             static constexpr unsigned int B = 1;
+            static constexpr bool base_case = true;
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr float r_a = 0.5f;
@@ -406,6 +440,7 @@ namespace FFT {
         struct FFTLayer<7> {
             static constexpr unsigned int A = 7;
             static constexpr unsigned int B = 1;
+            static constexpr bool base_case = true;
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T r_1 = {0.623489801859, -0.781831482468};
@@ -442,6 +477,7 @@ namespace FFT {
         struct FFTLayer<8> {
             static constexpr unsigned int A = 8;
             static constexpr unsigned int B = 1;
+            static constexpr bool base_case = true;
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr float c = 0.707106781187f;

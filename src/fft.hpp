@@ -257,7 +257,6 @@ namespace FFT {
                      *  adjust it by the appropriate twiddle factor.
                      */
 
-                    // TODO : Need to order twiddle factors so they are accessed linearly
                     for (unsigned int j = 0; j < B; j++) {
                         workspace[j] = m(temp_data[i + j * A], twiddle_factors[i * B + j]);
                     }

@@ -139,60 +139,72 @@ namespace FFT {
         template<unsigned int N>
         static void Init() { FFTRecurseLayer<N,N>::Init(); }
 
-        // The result is not shifted so the DC component is still at index 0,
-        //  and the FFT and IFFT are inverses of each other
         template<unsigned int N>
         static void fft(T *__restrict__ in, T *__restrict__ out) noexcept {
-            if constexpr (FFTRecurseLayer<N,N>::base_case) {
-                FFTRecurseLayer<N,N>::fft_recurse(in, out);
-            } else {
-                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_in;
-                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_out;
-                for (unsigned int i = 0; i < N; i++) {
-                    temp_in[i] = in[i];
-                }
-                T * temp_res = FFTRecurseLayer<N,N>::fft_recurse(temp_in.data(), temp_out.data());
-                transpose<N, 1>(temp_res, out);
-            }
-
-            // Normalize
-            // FFTW does not normalize, so this loop should be commented
-            //  out for appropriate performance comparisons.
-            for (std::size_t i = 0; i < N; i++)
-                out[i] /= static_cast<float>(N);
-
+            top_level_fft<N, true>(in, out);
             return;
         }
-
-        // The Inverse DFT matrix is the same as the DFT matrix but with the corresponding
-        //  factors conjugated.
+ 
         template<unsigned int N>
         static void ifft(T *__restrict__ in, T *__restrict__ out) noexcept {
-            for (std::size_t i = 0; i < N; i++)
-                in[i] = conj(in[i]);
-            
-            if constexpr (FFTRecurseLayer<N,N>::base_case) {
-                FFTRecurseLayer<N,N>::fft_recurse(in, out);
-            } else {
-                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_in;
-                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_out;
-                for (unsigned int i = 0; i < N; i++) {
-                    temp_in[i] = in[i];
-                }
-                T * temp_res = FFTRecurseLayer<N,N>::fft_recurse(temp_in.data(), temp_out.data());
-                transpose<N, 1>(temp_res, out);
-            }
-
-            for (std::size_t i = 0; i < N; i++)
-                out[i] = conj(out[i]);
-
-            // NOTE : if the fft is normalized, the ifft does not need to be normalized
-            //  to keep the ifft the exact inverse operation of the fft.
-
+            top_level_fft<N, false>(in, out);
             return;
         }
 
         private:
+
+        // switchable forward / backward fft top level function to reduce redundant code
+        template<unsigned int N, bool forward>
+        static void top_level_fft(T *__restrict__ in, T *__restrict__ out) noexcept {
+            // The result is not shifted so the DC component is still at index 0,
+            //  and the FFT and IFFT are inverses of each other
+            
+            // The Inverse DFT matrix is the same as the DFT matrix but with the corresponding
+            //  factors conjugated.
+            if constexpr (!forward) {
+                for (std::size_t i = 0; i < N; i++)
+                    in[i] = conj(in[i]);
+            }
+            
+            if constexpr (FFTRecurseLayer<N,N>::base_case) {
+                // As a base case, we assume that it is done as a straightforward DFT
+                DFT<N>::execute(in, out);
+            } else {
+                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_in;
+                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_out;
+                constexpr unsigned int A = FFTRecurseLayer<N,N>::A;
+                constexpr unsigned int B = FFTRecurseLayer<N,N>::B;
+                for (unsigned int i = 0; i < B; i++) {
+                    /* Transpose input data around the first radix A
+                     *  to create B bins of size A.
+                     * 
+                     * We create a single bin and compute its FFT before
+                     *  moving onto the next bin to improve cache locality.
+                     */
+                        
+                    for (unsigned int j = 0; j < A; j++) {
+                        temp_in[i * A + j] = in[i + j * B];
+                    } 
+                }
+                T * temp_res = FFTRecurseLayer<N,N>::fft_recurse(temp_in.data(), temp_out.data());
+                transpose<N, 1>(temp_res, out);
+            }
+
+            if constexpr (forward) {
+                // Normalize
+                // FFTW does not normalize, so this loop should be commented
+                //  out for appropriate performance comparisons.
+                for (std::size_t i = 0; i < N; i++)
+                    out[i] /= static_cast<float>(N);
+            } else {
+                // If the fft is normalized, the ifft does not need to be normalized
+                //  to keep the ifft the exact inverse operation of the fft.
+                for (std::size_t i = 0; i < N; i++)
+                    out[i] = conj(out[i]);
+            } 
+
+            return;
+        }
         
         // Partial specialization for prime N - uses full DFT matrix
         template<unsigned int N> 
@@ -466,37 +478,18 @@ namespace FFT {
             }
 
             static T * fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
+                // Do the A sized FFT on each bin
+                for (unsigned int i = 0; i < L/A; i++) {
+                    DFT<A>::execute(in + (i * A), out + (i * A));
+                }
+
                 if constexpr (base_case) {
-                    for (unsigned int i = 0; i < L/N; i++) {
-                        DFT<N>::execute(in + (i * N), out + (i * N));
-                    }
                     return out;
                 } else {
-                    for (unsigned int i = 0; i < L/N; i++) {
-                        for (unsigned int j = 0; j < B; j++) {
-                            /* Transpose input data around the first radix A
-                             *  to create B bins of size A.
-                             * 
-                             * We create a single bin and compute its FFT before
-                             *  moving onto the next bin to improve cache locality.
-                             */
-                        
-                            for (unsigned int k = 0; k < A; k++) {
-                                out[i * N + j * A + k] = in[i * N + j + k * B];
-                            } 
-                        }
-                    }
-
-                    // Do the A sized FFT on each bin
-                    for (unsigned int i = 0; i < L/A; i++) {
-                        DFT<A>::execute(out + (i * A), in + (i * A));
-                    }
-
                     // Cooley Tukey twiddle factors
                     T *twiddle_factors = std::assume_aligned<MY_CPU_LOAD_SIZE>(
                         FFTPlan<T>::get_twiddle_factors_by_angle<A, B>());
 
-                
                     for (unsigned int i = 0; i < L/N; i++) {
                         for (unsigned int j = 0; j < A; j++) {
                             /* Same tactic as above to transpose input data around
@@ -508,14 +501,27 @@ namespace FFT {
                              */
 
                             for (unsigned int k = 0; k < B; k++) {
-                                out[i * N + j * B + k] = m(in[i * N + j + k * A], twiddle_factors[j * B + k]);
+                                in[i * N + j * B + k] = m(out[i * N + j + k * A], twiddle_factors[j * B + k]);
                             }
                         }
                     }
-                
-                    // Do the B sized FFT on each bin
+
+                    // Move twiddled data into the layout the next level expects.
+                    // When next level is base case (D==1) this is a copy; otherwise a transpose
+                    // around the next FFT layer's A (recorded as C here) as the radix.
+                    constexpr unsigned int C = FFTRecurseLayer<L, B>::A;
+                    constexpr unsigned int D = FFTRecurseLayer<L, B>::B;
+                    for (unsigned int i = 0; i < L/B; i++) {
+                        for (unsigned int j = 0; j < D; j++) {
+                            for (unsigned int k = 0; k < C; k++) {
+                                out[i * B + j * C + k] = in[i * B + j + k * D];
+                            }
+                        }
+                    }
+
+                    // Next level reads from first arg; it writes result to second. We return that.
                     return FFTRecurseLayer<L, B>::fft_recurse(out, in);
-                }
+                } 
             }
         };
         

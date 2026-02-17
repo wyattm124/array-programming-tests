@@ -127,7 +127,7 @@ namespace FFT {
                 factors[i * B + j] = T{static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
             }
         }
-    } 
+    }
     
     template <typename T>
     class FFTPlan {
@@ -137,17 +137,17 @@ namespace FFT {
         static constexpr auto mc = mult_conj<T>;
 
         template<unsigned int N>
-        static void Init() { FFTLayer<N>::Init(); }
+        static void Init() { FFTRecurseLayer<N,N>::Init(); }
 
         // The result is not shifted so the DC component is still at index 0,
         //  and the FFT and IFFT are inverses of each other
         template<unsigned int N>
         static void fft(T *__restrict__ in, T *__restrict__ out) noexcept {
-            if constexpr (FFTLayer<N>::base_case) {
-                FFTLayer<N>::fft_recurse(in, out);
+            if constexpr (FFTRecurseLayer<N,N>::base_case) {
+                FFTRecurseLayer<N,N>::fft_recurse(in, out);
             } else {
                 alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_data;
-                FFTLayer<N>::fft_recurse(in, temp_data.data());
+                FFTRecurseLayer<N,N>::fft_recurse(in, temp_data.data());
                 transpose<N, 1>(temp_data.data(), out);
             }
 
@@ -167,11 +167,11 @@ namespace FFT {
             for (std::size_t i = 0; i < N; i++)
                 in[i] = conj(in[i]);
             
-            if constexpr (FFTLayer<N>::base_case) {
-                FFTLayer<N>::fft_recurse(in, out);
+            if constexpr (FFTRecurseLayer<N,N>::base_case) {
+                FFTRecurseLayer<N,N>::fft_recurse(in, out);
             } else {
                 alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_data;
-                FFTLayer<N>::fft_recurse(in, temp_data.data());
+                FFTRecurseLayer<N,N>::fft_recurse(in, temp_data.data());
                 transpose<N, 1>(temp_data.data(), out);
             }
 
@@ -185,95 +185,10 @@ namespace FFT {
         }
 
         private:
-
-        template<unsigned int N, unsigned int S>
-        static void transpose(T *__restrict__ in, T *__restrict__ out) noexcept {
-            constexpr unsigned int A = FFTFactorGen<T>::get_best_factor(N);
-            constexpr unsigned int B = N / A;
-
-            // Transpose result back in order
-            for (unsigned int i = 0; i < A; i++) {
-                if constexpr (B == 1) {
-                    out[S * i] = in[i];
-                } else {
-                    transpose<B, A * S>(in + (B * i), out + (S * i));
-                }
-            }
-            return;
-        }
-
-        template<unsigned int N>
-        struct FFTLayer {
-            static constexpr unsigned int A = FFTFactorGen<T>::get_best_factor(N);
-            static constexpr unsigned int B = N / A;
-            static constexpr bool base_case = false;
-
-            static void Init() {
-                // Ensure the coeffs are calculated
-                volatile T* coefs = FFTPlan<T>::get_twiddle_factors_by_angle<A, B>();
-                FFTLayer<A>::Init();
-                FFTLayer<B>::Init();
-
-                // First layer for A must be a non-recursive base case to make sure
-                //  recursive transpositions are done as expected
-                static_assert(FFTLayer<A>::base_case);
-            }
-
-            static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
-                // TODO : may not want to put this on the stack for large FFT steps
-                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_data;
-
-                for (unsigned int i = 0; i < B; i++) {
-
-                    alignas(MY_CPU_LOAD_SIZE) std::array<T, A> workspace;
-
-                    /* Transpose input data around the first radix A
-                     *  to create B bins of size A.
-                     * 
-                     * We create a single bin and compute its FFT before
-                     *  moving onto the next bin to improve cache locality.
-                     */
-                    for (unsigned int j = 0; j < A; j++) {
-                        workspace[j] = in[i + j * B];
-                    }
-
-                    // Do the A sized FFT on the current bin
-                    FFTLayer<A>::fft_recurse(workspace.data(), temp_data.data() + (i * A));
-                }
-
-                // Cooley Tukey twiddle factors
-                T *twiddle_factors = std::assume_aligned<MY_CPU_LOAD_SIZE>(
-                    FFTPlan<T>::get_twiddle_factors_by_angle<A, B>());
-
-                for (unsigned int i = 0; i < A; i++) {
-
-                    alignas(MY_CPU_LOAD_SIZE) std::array<T, B> workspace;
-                 
-                    /* Same tactic as above to transpose input data around
-                     *  second radix B.
-                     * 
-                     * Here is different than above only in tha before using
-                     *  this input for the recursive FFT, we make sure to
-                     *  adjust it by the appropriate twiddle factor.
-                     */
-
-                    for (unsigned int j = 0; j < B; j++) {
-                        workspace[j] = m(temp_data[i + j * A], twiddle_factors[i * B + j]);
-                    }
-
-                    // Do the B sized FFT on the current bin
-                    FFTLayer<B>::fft_recurse(workspace.data(), out + (i * B));
-                }
-            }
-        };
-
+        
         // Partial specialization for prime N - uses full DFT matrix
-        template<unsigned int N>
-        requires prime_factor::Prime<N>
-        struct FFTLayer<N> {
-            static constexpr unsigned int A = N;
-            static constexpr unsigned int B = 1;
-            static constexpr bool base_case = true;
+        template<unsigned int N> 
+        struct DFT {
             static void Init() {
                 // Ensure the coeffs are calculated
                 volatile T* coefs = FFTPlan<T>::get_dft_matrix_by_angle<N>();
@@ -295,12 +210,9 @@ namespace FFT {
 
         // Hand written DFT cases serve as base cases for recursive Cooley Tookey
         template<>
-        struct FFTLayer<1> {
-            static constexpr unsigned int A = 1;
-            static constexpr unsigned int B = 1;
-            static constexpr bool base_case = true;
+        struct DFT<1> {
             static void Init() {
-                // This init should never be called, as this FFTLayer should never be used
+                // This init should never be called, as this FFTRecurseLayer should never be used
                 static_assert(false);
             }
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
@@ -310,10 +222,7 @@ namespace FFT {
         };
         
         template<>
-        struct FFTLayer<2> {
-            static constexpr unsigned int A = 2;
-            static constexpr unsigned int B = 1;
-            static constexpr bool base_case = true;
+        struct DFT<2> {
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 const auto x_0 = in[0];
@@ -325,10 +234,7 @@ namespace FFT {
         };
 
         template<>
-        struct FFTLayer<3> {
-            static constexpr unsigned int A = 3;
-            static constexpr unsigned int B = 1;
-            static constexpr bool base_case = true;
+        struct DFT<3> {
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T third_root = {-0.5f, -0.866025403784f};
@@ -343,10 +249,7 @@ namespace FFT {
         };
 
         template<>
-        struct FFTLayer<4> {
-            static constexpr unsigned int A = 4;
-            static constexpr unsigned int B = 1;
-            static constexpr bool base_case = true;
+        struct DFT<4> {
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 const T x_0 = in[0];
@@ -371,10 +274,7 @@ namespace FFT {
         };
 
         template<>
-        struct FFTLayer<5> {
-            static constexpr unsigned int A = 5;
-            static constexpr unsigned int B = 1;
-            static constexpr bool base_case = true;
+        struct DFT<5> {
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T root_1 = {0.309016994375, -0.951056516295};
@@ -398,10 +298,7 @@ namespace FFT {
         };
 
         template<>
-        struct FFTLayer<6> {
-            static constexpr unsigned int A = 6;
-            static constexpr unsigned int B = 1;
-            static constexpr bool base_case = true;
+        struct DFT<6> {
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr float r_a = 0.5f;
@@ -437,10 +334,7 @@ namespace FFT {
         };
 
         template<>
-        struct FFTLayer<7> {
-            static constexpr unsigned int A = 7;
-            static constexpr unsigned int B = 1;
-            static constexpr bool base_case = true;
+        struct DFT<7> {
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T r_1 = {0.623489801859, -0.781831482468};
@@ -474,10 +368,7 @@ namespace FFT {
         };
 
         template<>
-        struct FFTLayer<8> {
-            static constexpr unsigned int A = 8;
-            static constexpr unsigned int B = 1;
-            static constexpr bool base_case = true;
+        struct DFT<8> {
             static void Init() {}
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr float c = 0.707106781187f;
@@ -535,6 +426,92 @@ namespace FFT {
             }
         };
 
+        template<unsigned int N, unsigned int S>
+        static void transpose(T *__restrict__ in, T *__restrict__ out) noexcept {
+            constexpr unsigned int A = FFTFactorGen<T>::get_best_factor(N);
+            constexpr unsigned int B = N / A;
+
+            // Transpose result back in order
+            for (unsigned int i = 0; i < A; i++) {
+                if constexpr (B == 1) {
+                    out[S * i] = in[i];
+                } else {
+                    transpose<B, A * S>(in + (B * i), out + (S * i));
+                }
+            }
+            return;
+        }
+
+        template<unsigned int L, unsigned int N>
+        struct FFTRecurseLayer {
+            static constexpr unsigned int A = FFTFactorGen<T>::get_best_factor(N);
+            static constexpr unsigned int B = N / A;
+            static constexpr bool base_case = (N == FFTFactorGen<T>::get_best_factor(N));
+
+            static void Init() {
+                if constexpr (!base_case) {
+                    // Ensure the coeffs are calculated
+                    volatile T* coefs = FFTPlan<T>::get_twiddle_factors_by_angle<A, B>();
+                    DFT<A>::Init();
+                    FFTRecurseLayer<L, B>::Init();
+                }
+            }
+
+            static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
+                if constexpr (base_case) {
+                    for (unsigned int i = 0; i < L/N; i++) {
+                        DFT<N>::fft_recurse(in + (i * N), out + (i * N));
+                    }
+                } else {
+                    // TODO : may not want to put this on the stack for large FFT steps
+                    alignas(MY_CPU_LOAD_SIZE) std::array<T, L> temp_data;
+                    for (unsigned int i = 0; i < L/N; i++) {
+                        for (unsigned int j = 0; j < B; j++) {
+                            /* Transpose input data around the first radix A
+                             *  to create B bins of size A.
+                             * 
+                             * We create a single bin and compute its FFT before
+                             *  moving onto the next bin to improve cache locality.
+                             */
+                        
+                            for (unsigned int k = 0; k < A; k++) {
+                                temp_data[i * N + j * A + k] = in[i * N + j + k * B];
+                            } 
+                        }
+                    }
+
+                    // Do the A sized FFT on each bin
+                    for (unsigned int i = 0; i < L/A; i++) {
+                        DFT<A>::fft_recurse(temp_data.data() + (i * A), out + (i * A));
+                    }
+
+                    // Cooley Tukey twiddle factors
+                    T *twiddle_factors = std::assume_aligned<MY_CPU_LOAD_SIZE>(
+                        FFTPlan<T>::get_twiddle_factors_by_angle<A, B>());
+
+                
+                    for (unsigned int i = 0; i < L/N; i++) {
+                        for (unsigned int j = 0; j < A; j++) {
+                            /* Same tactic as above to transpose input data around
+                             *  second radix B.
+                             *
+                             * Here is different than above only in tha before using
+                             *  this input for the recursive FFT, we make sure to
+                             *  adjust it by the appropriate twiddle factor.
+                             */
+
+                            for (unsigned int k = 0; k < B; k++) {
+                                temp_data[i * N + j * B + k] = m(out[i * N + j + k * A], twiddle_factors[j * B + k]);
+                            } 
+                        }
+                    }
+                
+                    // Do the B sized FFT on each bin
+                    FFTRecurseLayer<L, B>::fft_recurse(temp_data.data(), out);
+                }
+            }
+        };
+        
         private:
         // Coeffs calculated ahead of time trades memory for speed.
         //   Since Coeffs are roots of unity they could also be multiplied

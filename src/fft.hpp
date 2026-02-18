@@ -121,10 +121,10 @@ namespace FFT {
     
     template<typename T, unsigned int A, unsigned int B>
     void populate_twiddle_factors_by_angle(T* factors) {
-        for (unsigned int i = 0; i < A; i++) {
-            for (unsigned int j = 0; j < B; j++) {
+        for (unsigned int j = 0; j < B; j++) {
+            for (unsigned int i = 0; i < A; i++) {
                 const double angle = NegTwoPI * static_cast<double>(i * j) / static_cast<double>(A * B);
-                factors[i * B + j] = T{static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
+                factors[j * A + i] = T{static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
             }
         }
     }
@@ -161,16 +161,20 @@ namespace FFT {
             
             // The Inverse DFT matrix is the same as the DFT matrix but with the corresponding
             //  factors conjugated.
-            if constexpr (!forward) {
-                for (std::size_t i = 0; i < N; i++)
-                    in[i] = conj(in[i]);
+
+            alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_in;
+            for (std::size_t i = 0; i < N; i++) {
+                if constexpr (forward) {
+                    temp_in[i] = in[i];
+                } else {
+                    temp_in[i] = conj(in[i]);
+                }
             }
             
             if constexpr (FFTRecurseLayer<N,N>::base_case) {
                 // As a base case, we assume that it is done as a straightforward DFT
-                DFT<N>::execute(in, out);
+                DFT<N>::execute(temp_in.data(), out);
             } else {
-                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_in;
                 alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp_out;
                 constexpr unsigned int A = FFTRecurseLayer<N,N>::A;
                 constexpr unsigned int B = FFTRecurseLayer<N,N>::B;
@@ -183,11 +187,11 @@ namespace FFT {
                      */
                         
                     for (unsigned int j = 0; j < A; j++) {
-                        temp_in[i * A + j] = in[i + j * B];
+                        temp_out[i * A + j] = temp_in[i + j * B];
                     } 
                 }
-                T * temp_res = FFTRecurseLayer<N,N>::fft_recurse(temp_in.data(), temp_out.data());
-                transpose<N, 1>(temp_res, out);
+                FFTRecurseLayer<N,N>::fft_recurse(temp_out.data(), temp_in.data());
+                transpose<N, 1>(temp_in.data(), out);
             }
 
             if constexpr (forward) {
@@ -489,9 +493,11 @@ namespace FFT {
                     // Cooley Tukey twiddle factors
                     T *twiddle_factors = std::assume_aligned<MY_CPU_LOAD_SIZE>(
                         FFTPlan<T>::get_twiddle_factors_by_angle<A, B>());
-
+                    
+                    constexpr unsigned int C = FFTRecurseLayer<L, B>::A;
+                    constexpr unsigned int D = FFTRecurseLayer<L, B>::B;
                     for (unsigned int i = 0; i < L/N; i++) {
-                        for (unsigned int j = 0; j < A; j++) {
+                        for (unsigned int l = 0; l < C; l++) {
                             /* Same tactic as above to transpose input data around
                              *  second radix B.
                              *
@@ -500,27 +506,18 @@ namespace FFT {
                              *  adjust it by the appropriate twiddle factor.
                              */
 
-                            for (unsigned int k = 0; k < B; k++) {
-                                in[i * N + j * B + k] = m(out[i * N + j + k * A], twiddle_factors[j * B + k]);
+                            for (unsigned int k = 0; k < D; k++) {
+                                for (unsigned int j = 0; j < A; j++) {
+                                    in[(i * N + j * B) + (k * C + l)] = 
+                                        m(out[i * N + j + (k + l * D) * A],
+                                          twiddle_factors[j + (k + l * D) * A]);
+                                }
                             }
                         }
-                    }
-
-                    // Move twiddled data into the layout the next level expects.
-                    // When next level is base case (D==1) this is a copy; otherwise a transpose
-                    // around the next FFT layer's A (recorded as C here) as the radix.
-                    constexpr unsigned int C = FFTRecurseLayer<L, B>::A;
-                    constexpr unsigned int D = FFTRecurseLayer<L, B>::B;
-                    for (unsigned int i = 0; i < L/B; i++) {
-                        for (unsigned int j = 0; j < D; j++) {
-                            for (unsigned int k = 0; k < C; k++) {
-                                out[i * B + j * C + k] = in[i * B + j + k * D];
-                            }
-                        }
-                    }
+                    } 
 
                     // Next level reads from first arg; it writes result to second. We return that.
-                    return FFTRecurseLayer<L, B>::fft_recurse(out, in);
+                    return FFTRecurseLayer<L, B>::fft_recurse(in, out);
                 } 
             }
         };

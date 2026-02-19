@@ -33,6 +33,10 @@ namespace FFT {
             return {a[0] * b, a[1] * b};
         }
         
+        friend constexpr Complex operator/(const Complex& a, float b) noexcept {
+            return {a[0] / b, a[1] / b};
+        }
+        
         friend constexpr Complex operator*(const Complex& a, const Complex& b) noexcept {
             return {a[0] * b[0], a[1] * b[1]};
         }

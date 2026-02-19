@@ -136,6 +136,8 @@ namespace FFT {
         static constexpr auto m = mult<T>;
         static constexpr auto mc = mult_conj<T>;
 
+        // Layers need to be initialized recursively to populate
+        //  their corresponding coefficient arrays.
         template<unsigned int N>
         static void Init() { FFTRecurseLayer<N,N>::Init(); }
 
@@ -163,22 +165,43 @@ namespace FFT {
             //  factors conjugated.
 
             if constexpr (FFTRecurseLayer<N,N>::base_case) {
-                // As a base case, we assume that it is done as a straightforward DFT
+                // If we are already at a base case, then we just need to do a straightforward
+                //  DFT.
                 DFT<N, forward>::execute(in, out);
 
                 for (int i = 0; i < N; i++) {
                     out[i] = forward ? (out[i] / static_cast<float>(N)) : conj(out[i]);
                 }
             } else {
+                // TODO : large FFTs overflow the stack, this array may need to be put on the heap.
                 alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp;
                 constexpr unsigned int A = FFTRecurseLayer<N,N>::A;
                 constexpr unsigned int B = FFTRecurseLayer<N,N>::B;
                 for (unsigned int i = 0; i < B; i++) {
                     /* Transpose input data around the first radix A
                      *  to create B bins of size A.
-                     * 
-                     * We create a single bin and compute its FFT before
-                     *  moving onto the next bin to improve cache locality.
+                     *
+                     * Generally, in the recursive case each layer is
+                     *  execute as:
+                     *  (1) Transpose around Radix A
+                     *  (2) Compute A sized DFT on each bin
+                     *  (3) Transpose around Radix B
+                     *  (4) Compute B sized FFT on each bin
+                     *    - The NEXT layer's N is the CURRENT layer's B
+                     *    - If the NEXT layer's B is 1, this is a base case
+                     *      and the layer will just compute the B sized DFT
+                     *      on each bin.
+                     *    - If the NEXT layer's B is NOT 1, then it will
+                     *      be another recursive layer with the new
+                     *      N, A, and B.
+                     *
+                     * The recursive nature of the transpositions allows them to
+                     *  be fused between layers. However, this fusion also requires
+                     *  this required the first transposition to be completed here.
+                     *
+                     * To minimize data movement, this initial transposition is also
+                     *  used to load the input into an array the FFT can write over
+                     *  as workspace memory.
                      */
                         
                     for (unsigned int j = 0; j < A; j++) {
@@ -192,7 +215,8 @@ namespace FFT {
             return;
         }
         
-        // Partial specialization for prime N - uses full DFT matrix
+        // A full DFT done by simple matrix multiplication with the appropriate DFT matrix.
+        //  Specific sizes are specialized and optimized as appropriate.
         template<unsigned int N, bool forward> 
         struct DFT {
             static void Init() {
@@ -200,6 +224,8 @@ namespace FFT {
                 volatile T* coefs = FFTPlan<T>::get_dft_matrix_by_angle<N>();
             }
             
+            // Simply compute the multiplication of the input array (vector) by
+            //  by the DFT matrix.
             static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static T* dft_matrix = std::assume_aligned<MY_CPU_LOAD_SIZE>(
                     FFTPlan<T>::get_dft_matrix_by_angle<N>());
@@ -465,6 +491,8 @@ namespace FFT {
                     // Ensure the coeffs are calculated
                     volatile T* coefs = FFTPlan<T>::get_twiddle_factors_by_angle<A, B>();
                     DFT<A, true>::Init();
+
+                    // As well as the next layer's coeffs
                     FFTRecurseLayer<L, B>::Init();
                 }
             }
@@ -480,21 +508,46 @@ namespace FFT {
                     T *twiddle_factors = std::assume_aligned<MY_CPU_LOAD_SIZE>(
                         FFTPlan<T>::get_twiddle_factors_by_angle<A, B>());
                     
+                    /* This nested loop (1) transposes the data around the second radix B
+                     *  to create A bins of size B (2) multiplies the transposed data
+                     *  by this layer's twiddle factors (3) transposes the result around 
+                     *  what is technically the next layer's A (used as C here) to create 
+                     *  D bins (where D is the next layer's B) of size C.
+                     *
+                     * .All 3 operations are fused to (1) minimize the amount of intermediate
+                     *  workspace memory required for the operation (2) minimize overall 
+                     *  data movment (CPU IO) (3) structure the operations in a way that is
+                     *  easier to tile as a comprehensive unit, if required.
+                     *  
+                     *  Currently the loops are structured so all reads are consecutive from
+                     *  their buffers, but the operations are not tiled.
+                     */
                     constexpr unsigned int C = FFTRecurseLayer<L, B>::A;
                     constexpr unsigned int D = FFTRecurseLayer<L, B>::B;
                     for (unsigned int i = 0; i < L/N; i++) {
+                        T * const temp_in  = in  + i * N;
+                        T * const temp_out = out + i * N;
                         for (unsigned int l = 0; l < C; l++) {
                             for (unsigned int k = 0; k < D; k++) {
                                 for (unsigned int j = 0; j < A; j++) {
-                                    in[(i * N + j * B) + (k * C + l)] = 
-                                        m(out[i * N + j + (k + l * D) * A],
-                                          twiddle_factors[j + (k + l * D) * A]);
+                                    const unsigned int read_index  = j     + k * A + l * D * A;
+                                    const unsigned int write_index = j * B + k * C + l;
+                                    temp_in[write_index] =
+                                        m(temp_out[read_index], twiddle_factors[read_index]);
                                 }
                             }
                         }
                     } 
 
-                    // Next level reads from first arg; it writes result to second. We return that.
+                    /* Recursively do the B sized FFTs on each bin, which will execute using
+                     *  this recursive layer with the next layer's N as this layer's B.
+                     *  
+                     * Note this layer's B (the next layer's N) is always a factor of this
+                     *  layer's N, so inductively N will be decreasing until B is 1. When B
+                     *  is 1 we hit our base case and return. This guarantees not only that
+                     *  the recursive calls will terminate at runtime, but also that the
+                     *  recursive template generation will terminate at compile time.
+                     */
                     FFTRecurseLayer<L, B>::fft_recurse(in, out);
                 }
                 return;

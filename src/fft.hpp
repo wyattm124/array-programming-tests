@@ -1,9 +1,7 @@
 #pragma once
 
+#include <cstdlib>
 #include <cmath>
-#include <array>
-#include <new>
-#include <memory>
 
 #include "prime_factor.hpp"
 
@@ -19,7 +17,9 @@
 #define MCA_END __asm volatile("# LLVM-MCA-END");
 
 // For Cache aligning
-#define MY_CPU_LOAD_SIZE 64
+constexpr unsigned int MY_CPU_LOAD_SIZE = 64;
+constexpr unsigned int MY_MAX_SIMD_SIZE = 32;
+constexpr unsigned int MY_MAX_ALIGNMENT = MY_CPU_LOAD_SIZE > MY_MAX_SIMD_SIZE ? MY_CPU_LOAD_SIZE : MY_MAX_SIMD_SIZE;
 
 namespace FFT {
 
@@ -28,18 +28,18 @@ namespace FFT {
     
     template <typename T>
     constexpr void wave_gen(T *time_domain, T *freq_domain,
-        std::size_t N,
+        unsigned int N,
         unsigned int f = 1,
         unsigned int phase = 0,
         unsigned int amp = 1) {
         for (unsigned int i = 0; i < N; i++) {
             const float angle = static_cast<float>(TwoPI) * static_cast<float>((i * f) + phase)
                                   / static_cast<float>(N);
-            time_domain[i] += T{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
+            time_domain[i] += T{cosf(angle), sinf(angle)} * static_cast<float>(amp);
         }
         const float angle = static_cast<float>(TwoPI) * 
                                   (static_cast<float>(phase) / static_cast<float>(N));
-        freq_domain[f] += T{std::cosf(angle), std::sinf(angle)} * static_cast<float>(amp);
+        freq_domain[f] += T{cosf(angle), sinf(angle)} * static_cast<float>(amp);
     } 
 
     template <typename T>
@@ -64,7 +64,7 @@ namespace FFT {
     /// Operations used by FFT
     template <typename T>
     inline float abs(const T &__restrict__ a) noexcept {
-        return std::sqrt(a[0]*a[0] + a[1]*a[1]);
+        return sqrtf(a[0]*a[0] + a[1]*a[1]);
     }
 
     template <typename T>
@@ -109,12 +109,12 @@ namespace FFT {
 
     template<typename T, unsigned int N>
     void populate_dft_matrix_by_angle(T *mat) {
-        for (std::size_t i = 0; i < N; i++) {
-            for (std::size_t j = 0; j < N; j++) {
+        for (unsigned int i = 0; i < N; i++) {
+            for (unsigned int j = 0; j < N; j++) {
                 const double angle = 
                     NegTwoPI * static_cast<double>((i * j) % N) / static_cast<double>(N);
-                    mat[i * N + j] = T{static_cast<float>(std::cos(angle)),
-                                          static_cast<float>(std::sin(angle))};
+                    mat[i * N + j] = T{static_cast<float>(cos(angle)),
+                                          static_cast<float>(sin(angle))};
             }
         }
     }
@@ -124,7 +124,7 @@ namespace FFT {
         for (unsigned int j = 0; j < B; j++) {
             for (unsigned int i = 0; i < A; i++) {
                 const double angle = NegTwoPI * static_cast<double>(i * j) / static_cast<double>(A * B);
-                factors[j * A + i] = T{static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle))};
+                factors[j * A + i] = T{static_cast<float>(cos(angle)), static_cast<float>(sin(angle))};
             }
         }
     }
@@ -142,13 +142,17 @@ namespace FFT {
         static void Init() { FFTRecurseLayer<N,N>::Init(); }
 
         template<unsigned int N>
-        static void fft(T *__restrict__ in, T *__restrict__ out) noexcept {
+        static void fft(T *__restrict__ in_unaligned, T *__restrict__ out_unaligned) noexcept {
+            T *in = static_cast<T *>(__builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
+            T *out = static_cast<T *>(__builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
             top_level_fft<N, true>(in, out);
             return;
         }
  
         template<unsigned int N>
-        static void ifft(T *__restrict__ in, T *__restrict__ out) noexcept {
+        static void ifft(T *__restrict__ in_unaligned, T *__restrict__ out_unaligned) noexcept {
+            T *in = static_cast<T *>(__builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
+            T *out = static_cast<T *>(__builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
             top_level_fft<N, false>(in, out);
             return;
         }
@@ -157,7 +161,9 @@ namespace FFT {
 
         // switchable forward / backward fft top level function to reduce redundant code
         template<unsigned int N, bool forward>
-        static void top_level_fft(T *__restrict__ in, T *__restrict__ out) noexcept {
+        static void top_level_fft(T *__restrict__ in_unaligned, T *__restrict__ out_unaligned) noexcept {
+            T *in = static_cast<T *>(__builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
+            T *out = static_cast<T *>(__builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
             // The result is not shifted so the DC component is still at index 0,
             //  and the FFT and IFFT are inverses of each other
             
@@ -174,7 +180,7 @@ namespace FFT {
                 }
             } else {
                 // TODO : large FFTs overflow the stack, this array may need to be put on the heap.
-                alignas(MY_CPU_LOAD_SIZE) std::array<T, N> temp;
+                alignas(MY_CPU_LOAD_SIZE) T temp[N];
                 constexpr unsigned int A = FFTRecurseLayer<N,N>::A;
                 constexpr unsigned int B = FFTRecurseLayer<N,N>::B;
                 for (unsigned int i = 0; i < B; i++) {
@@ -208,8 +214,8 @@ namespace FFT {
                         out[i * A + j] = forward ? in[i + j * B] : conj(in[i + j * B]);
                     } 
                 }
-                FFTRecurseLayer<N,N>::fft_recurse(out, temp.data());
-                transpose<N, 1, forward>(temp.data(), out);
+                FFTRecurseLayer<N,N>::fft_recurse(out, temp);
+                transpose<N, 1, forward>(temp, out);
             } 
 
             return;
@@ -227,8 +233,8 @@ namespace FFT {
             // Simply compute the multiplication of the input array (vector) by
             //  by the DFT matrix.
             static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-                static T* dft_matrix = std::assume_aligned<MY_CPU_LOAD_SIZE>(
-                    FFTPlan<T>::get_dft_matrix_by_angle<N>());
+                static T* dft_matrix = static_cast<T *>(__builtin_assume_aligned(
+					FFTPlan<T>::get_dft_matrix_by_angle<N>(), MY_CPU_LOAD_SIZE));
 
                 for (unsigned int i = 0; i < N; i++) {
                     T temp_ans = {0, 0};
@@ -257,8 +263,8 @@ namespace FFT {
         struct DFT<2, forward> {
             static void Init() {}
             static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-                const auto x_0 = forward ? in[0] : conj(in[0]);
-                const auto x_1 = forward ? in[1] : conj(in[1]);
+                const T &x_0 = forward ? in[0] : conj(in[0]);
+                const T &x_1 = forward ? in[1] : conj(in[1]);
                 out[0] = x_0 + x_1;
                 out[1] = x_0 - x_1;
                 return;
@@ -270,9 +276,9 @@ namespace FFT {
             static void Init() {}
             static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T third_root = {-0.5f, -0.866025403784f};
-                const T x_0 = forward ? in[0] : conj(in[0]);
-                const T x_1 = forward ? in[1] : conj(in[1]);
-                const T x_2 = forward ? in[2] : conj(in[2]);
+                const T &x_0 = forward ? in[0] : conj(in[0]);
+                const T &x_1 = forward ? in[1] : conj(in[1]);
+                const T &x_2 = forward ? in[2] : conj(in[2]);
                 out[0] = x_0 + x_1 + x_2;
                 out[1] = x_0 + m(x_1, third_root) + mc(x_2, third_root);
                 out[2] = x_0 + mc(x_1, third_root) + m(x_2, third_root);
@@ -284,20 +290,20 @@ namespace FFT {
         struct DFT<4, forward> {
             static void Init() {}
             static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-                const T x_0 = forward ? in[0] : conj(in[0]);
-                const T x_1 = forward ? in[1] : conj(in[1]);
-                const T x_2 = forward ? in[2] : conj(in[2]);
-                const T x_3 = forward ? in[3] : conj(in[3]);
+                const T &x_0 = forward ? in[0] : conj(in[0]);
+                const T &x_1 = forward ? in[1] : conj(in[1]);
+                const T &x_2 = forward ? in[2] : conj(in[2]);
+                const T &x_3 = forward ? in[3] : conj(in[3]);
                 { // First do evens
-                    const T a = x_0 + x_2;
-                    const T b = x_1 + x_3;
+                    const T &a = x_0 + x_2;
+                    const T &b = x_1 + x_3;
                     out[0] = a + b;
                     out[2] = a - b;
                 }
                 { // Then do odds
-                    const T a = x_0 - x_2;
-                    const T temp_b = x_1 - x_3;
-                    const T b = {temp_b[1], -temp_b[0]};
+                    const T &a = x_0 - x_2;
+                    const T &temp_b = x_1 - x_3;
+                    const T &b = {temp_b[1], -temp_b[0]};
                     out[1] = a + b;
                     out[3] = a - b;
                 }
@@ -311,11 +317,11 @@ namespace FFT {
             static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr T root_1 = {0.309016994375, -0.951056516295};
                 static constexpr T root_2 = {-0.809016994375, -0.587785252292};
-                const T x_0 = forward ? in[0] : conj(in[0]);
-                const T x_1 = forward ? in[1] : conj(in[1]);
-                const T x_2 = forward ? in[2] : conj(in[2]);
-                const T x_3 = forward ? in[3] : conj(in[3]);
-                const T x_4 = forward ? in[4] : conj(in[4]);
+                const T &x_0 = forward ? in[0] : conj(in[0]);
+                const T &x_1 = forward ? in[1] : conj(in[1]);
+                const T &x_2 = forward ? in[2] : conj(in[2]);
+                const T &x_3 = forward ? in[3] : conj(in[3]);
+                const T &x_4 = forward ? in[4] : conj(in[4]);
                 out[0] = x_0 + x_1 + x_2 + x_3 + x_4;
                 out[1] = x_0 + m(x_1, root_1) + m(x_2, root_2) +
                                mc(x_3, root_2) + mc(x_4, root_1);
@@ -335,29 +341,29 @@ namespace FFT {
             static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
                 static constexpr float r_a = 0.5f;
                 static constexpr float r_b = -0.866025403784f;
-                const T x_0 = forward ? in[0] : conj(in[0]);
-                const T x_1 = forward ? in[1] : conj(in[1]);
-                const T x_2 = forward ? in[2] : conj(in[2]);
-                const T x_3 = forward ? in[3] : conj(in[3]);
-                const T x_4 = forward ? in[4] : conj(in[4]);
-                const T x_5 = forward ? in[5] : conj(in[5]);
+                const T &x_0 = forward ? in[0] : conj(in[0]);
+                const T &x_1 = forward ? in[1] : conj(in[1]);
+                const T &x_2 = forward ? in[2] : conj(in[2]);
+                const T &x_3 = forward ? in[3] : conj(in[3]);
+                const T &x_4 = forward ? in[4] : conj(in[4]);
+                const T &x_5 = forward ? in[5] : conj(in[5]);
                 {
-                    const T a = x_0 + x_2 + x_4;
-                    const T b = x_1 + x_3 + x_5;
+                    const T &a = x_0 + x_2 + x_4;
+                    const T &b = x_1 + x_3 + x_5;
                     out[0] = a + b;
                     out[3] = a - b;
                 }
                 {
-                    const T a = x_0 - x_3;
-                    const T b = x_1 - x_4;
-                    const T c = x_2 - x_5;
+                    const T &a = x_0 - x_3;
+                    const T &b = x_1 - x_4;
+                    const T &c = x_2 - x_5;
                     out[1] = a + m(b, T{r_a, r_b}) + m(c, T{-r_a, r_b});
                     out[5] = a + m(b, T{r_a, -r_b}) + m(c, T{-r_a, -r_b});
                 }
                 {
-                    const T a = x_0 + x_3;
-                    const T b = x_1 + x_4;
-                    const T c = x_2 + x_5;
+                    const T &a = x_0 + x_3;
+                    const T &b = x_1 + x_4;
+                    const T &c = x_2 + x_5;
                     out[2] = a + m(b, T{-r_a, r_b}) + m(c, T{-r_a, -r_b});
                     out[4] = a + m(b, T{-r_a, -r_b}) + m(c, T{-r_a, r_b});
                 }
@@ -372,13 +378,13 @@ namespace FFT {
                 static constexpr T r_1 = {0.623489801859, -0.781831482468};
                 static constexpr T r_2 = {-0.222520933956, -0.974927912182};
                 static constexpr T r_3 = {-0.900968867902, -0.433883739118};
-                const T x_0 = forward ? in[0] : conj(in[0]);
-                const T x_1 = forward ? in[1] : conj(in[1]);
-                const T x_2 = forward ? in[2] : conj(in[2]);
-                const T x_3 = forward ? in[3] : conj(in[3]);
-                const T x_4 = forward ? in[4] : conj(in[4]);
-                const T x_5 = forward ? in[5] : conj(in[5]);
-                const T x_6 = forward ? in[6] : conj(in[6]);
+                const T &x_0 = forward ? in[0] : conj(in[0]);
+                const T &x_1 = forward ? in[1] : conj(in[1]);
+                const T &x_2 = forward ? in[2] : conj(in[2]);
+                const T &x_3 = forward ? in[3] : conj(in[3]);
+                const T &x_4 = forward ? in[4] : conj(in[4]);
+                const T &x_5 = forward ? in[5] : conj(in[5]);
+                const T &x_6 = forward ? in[6] : conj(in[6]);
                 out[0] = x_0 + x_1 + x_2 + x_3 + x_4 + x_5 + x_6;
                 out[1] = x_0 + m(x_1, r_1) + m(x_2, r_2) + m(x_3, r_3) +
                   mc(x_4, r_3) + mc(x_5, r_2) + mc(x_6, r_1);
@@ -402,58 +408,62 @@ namespace FFT {
         template<bool forward>
         struct DFT<8, forward> {
             static void Init() {}
-            static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
+            static void execute(T *__restrict__ in_unaligned, T *__restrict__ out_unaligned) noexcept {
+                MCA_START;
+                T *in = static_cast<T *>(__builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
+                T *out = static_cast<T *>(__builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
                 static constexpr float c = 0.707106781187f;
                 static constexpr T eighth_root = {c,c};
                 static constexpr auto forth_root = [](T x){
                     return T{x[1], -x[0]};
                 };
-                const T x_0 = forward ? in[0] : conj(in[0]);
-                const T x_1 = forward ? in[1] : conj(in[1]);
-                const T x_2 = forward ? in[2] : conj(in[2]);
-                const T x_3 = forward ? in[3] : conj(in[3]);
-                const T x_4 = forward ? in[4] : conj(in[4]);
-                const T x_5 = forward ? in[5] : conj(in[5]);
-                const T x_6 = forward ? in[6] : conj(in[6]);
-                const T x_7 = forward ? in[7] : conj(in[7]);
+                const T &x_0 = forward ? in[0] : conj(in[0]);
+                const T &x_1 = forward ? in[1] : conj(in[1]);
+                const T &x_2 = forward ? in[2] : conj(in[2]);
+                const T &x_3 = forward ? in[3] : conj(in[3]);
+                const T &x_4 = forward ? in[4] : conj(in[4]);
+                const T &x_5 = forward ? in[5] : conj(in[5]);
+                const T &x_6 = forward ? in[6] : conj(in[6]);
+                const T &x_7 = forward ? in[7] : conj(in[7]);
                 {
-                    const T a_0 = x_0 + x_4;
-                    const T a_1 = x_2 + x_6;
-                    const T b_0 = x_1 + x_5;
-                    const T b_1 = x_3 + x_7;
+                    const T &a_0 = x_0 + x_4;
+                    const T &a_1 = x_2 + x_6;
+                    const T &b_0 = x_1 + x_5;
+                    const T &b_1 = x_3 + x_7;
                     { // 0 and 4 index, based on 2 DFTs of size 4 + shifted for index 2 and 6
-                        const T a = a_0 + a_1;
-                        const T b = b_0 + b_1;
+                        const T &a = a_0 + a_1;
+                        const T &b = b_0 + b_1;
                         out[0] = a + b;
                         out[4] = a - b;
                     }
                     { // 2 and 6 index, based on 2 DFTs of size 4 + shifted for index 0 and 4
-                        const T a = a_0 - a_1;
-                        const T b_p = b_0 - b_1;
-                        const T b = forth_root(b_p);
+                        const T &a = a_0 - a_1;
+                        const T &b_p = b_0 - b_1;
+                        const T &b = forth_root(b_p);
                         out[2] = a + b;
                         out[6] = a - b;
                     }
                 }
                 {
-                    const T a_0 = x_0 - x_4;
-                    const T a_1_p = x_2 - x_6;
-                    const T a_1 = forth_root(a_1_p);
+                    const T &a_0 = x_0 - x_4;
+                    const T &a_1_p = x_2 - x_6;
+                    const T &a_1 = forth_root(a_1_p);
                     { // index 3 and 5
-                        const T b_0_p = x_1 - x_5;
-                        const T b_0 = forth_root(b_0_p);
-                        const T b_1 = x_3 - x_7;
+                        const T &b_0_p = x_1 - x_5;
+                        const T &b_0 = forth_root(b_0_p);
+                        const T &b_1 = x_3 - x_7;
                         out[3] = (a_0 - a_1) + mc(b_1 + b_0, eighth_root);
                         out[5] = (a_0 + a_1) + m(b_1 - b_0, eighth_root);
                     }
                     { // DFT for index 1 and 7
-                        const T b_0 = x_1 - x_5;
-                        const T b_1_p = x_3 - x_7;
-                        const T b_1 = forth_root(b_1_p);
+                        const T &b_0 = x_1 - x_5;
+                        const T &b_1_p = x_3 - x_7;
+                        const T &b_1 = forth_root(b_1_p);
                         out[1] = (a_0 + a_1) + mc(b_0 + b_1, eighth_root);
                         out[7] = (a_0 - a_1) + m(b_0 - b_1, eighth_root); 
                     }
                 }
+                MCA_END;
                 return;
             }
         };
@@ -479,6 +489,23 @@ namespace FFT {
             }
             return;
         }
+	
+	    template<unsigned int L, unsigned int N, unsigned int A, unsigned int B, unsigned int C, unsigned int D>
+	    static void inner_transpose(T *__restrict__ in, T *__restrict__ out, T *__restrict__ twiddle_factors) {
+            for (unsigned int i = 0; i < L/N; i++) {
+                T * const temp_in  = in  + i * N;
+                T * const temp_out = out + i * N;
+                for (unsigned int l = 0; l < C; l++) {
+                    for (unsigned int k = 0; k < D; k++) {
+                        for (unsigned int j = 0; j < A; j++) {
+                            const unsigned int read_index  = j     + k * A + l * D * A;
+                            const unsigned int write_index = j * B + k * C + l;
+                            temp_out[write_index] = m(temp_in[read_index], twiddle_factors[read_index]);
+                        }
+                    }
+                }
+            }
+	    }
 
         template<unsigned int L, unsigned int N>
         struct FFTRecurseLayer {
@@ -505,8 +532,8 @@ namespace FFT {
 
                 if constexpr (!base_case) {
                     // Cooley Tukey twiddle factors
-                    T *twiddle_factors = std::assume_aligned<MY_CPU_LOAD_SIZE>(
-                        FFTPlan<T>::get_twiddle_factors_by_angle<A, B>());
+                    T *twiddle_factors = static_cast<T *>(__builtin_assume_aligned(
+					   FFTPlan<T>::get_twiddle_factors_by_angle<A, B>(), MY_CPU_LOAD_SIZE));
                     
                     /* This nested loop (1) transposes the data around the second radix B
                      *  to create A bins of size B (2) multiplies the transposed data
@@ -514,7 +541,7 @@ namespace FFT {
                      *  what is technically the next layer's A (used as C here) to create 
                      *  D bins (where D is the next layer's B) of size C.
                      *
-                     * .All 3 operations are fused to (1) minimize the amount of intermediate
+                     * All 3 operations are fused to (1) minimize the amount of intermediate
                      *  workspace memory required for the operation (2) minimize overall 
                      *  data movment (CPU IO) (3) structure the operations in a way that is
                      *  easier to tile as a comprehensive unit, if required.
@@ -522,22 +549,9 @@ namespace FFT {
                      *  Currently the loops are structured so all reads are consecutive from
                      *  their buffers, but the operations are not tiled.
                      */
-                    constexpr unsigned int C = FFTRecurseLayer<L, B>::A;
-                    constexpr unsigned int D = FFTRecurseLayer<L, B>::B;
-                    for (unsigned int i = 0; i < L/N; i++) {
-                        T * const temp_in  = in  + i * N;
-                        T * const temp_out = out + i * N;
-                        for (unsigned int l = 0; l < C; l++) {
-                            for (unsigned int k = 0; k < D; k++) {
-                                for (unsigned int j = 0; j < A; j++) {
-                                    const unsigned int read_index  = j     + k * A + l * D * A;
-                                    const unsigned int write_index = j * B + k * C + l;
-                                    temp_in[write_index] =
-                                        m(temp_out[read_index], twiddle_factors[read_index]);
-                                }
-                            }
-                        }
-                    } 
+
+		            inner_transpose<L, N, A, B, FFTRecurseLayer<L, B>::A, FFTRecurseLayer<L, B>::B>(out, in, twiddle_factors);
+                     
 
                     /* Recursively do the B sized FFTs on each bin, which will execute using
                      *  this recursive layer with the next layer's N as this layer's B.
@@ -552,9 +566,8 @@ namespace FFT {
                 }
                 return;
             }
-        };
+        };	
         
-        private:
         // Coeffs calculated ahead of time trades memory for speed.
         //   Since Coeffs are roots of unity they could also be multiplied
         //   together within loops to generate them as needed, but this 
@@ -567,7 +580,7 @@ namespace FFT {
         static T* get_dft_matrix_by_angle() {
             static T* coefs = []{
                 T* result = static_cast<T*>(
-                    ::operator new(sizeof(T) * N * N, std::align_val_t(MY_CPU_LOAD_SIZE)));
+                    aligned_alloc(MY_MAX_ALIGNMENT, sizeof(T) * N * N));
                 populate_dft_matrix_by_angle<T, N>(result); 
                 return result;
             }();
@@ -578,7 +591,7 @@ namespace FFT {
         static T* get_twiddle_factors_by_angle() {
             static T* coefs = []{
                 T* result = static_cast<T*>(
-                    ::operator new(sizeof(T) * A * B, std::align_val_t(MY_CPU_LOAD_SIZE)));
+                    aligned_alloc(MY_MAX_ALIGNMENT, sizeof(T) * A * B));
                 populate_twiddle_factors_by_angle<T, A, B>(result); 
                 return result;
             }();

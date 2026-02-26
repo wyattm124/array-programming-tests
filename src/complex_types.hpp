@@ -2,7 +2,11 @@
 
 // These are included to group all compatible FFT input types in this header
 #include <complex>
-#include <arm_neon.h>
+#ifdef ARCH_ARM
+    #include <arm_neon.h>
+#elif ARCH_x86_64
+    #include <immintrin.h>
+#endif
 
 namespace FFT {
     // Prefered Complex Type for fastest results, as it has best alignment without intrinsics.

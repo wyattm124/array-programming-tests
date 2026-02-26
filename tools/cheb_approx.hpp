@@ -1,5 +1,8 @@
+#pragma once
+
+#include <cmath>
 #include <iostream>
-#include <vector>
+#include <array>
 #include <functional>
 
 /*
@@ -41,7 +44,7 @@ constexpr std::array<double, N> cheb_gen_coef(const std::function<double(double)
     for (std::size_t i = 0; i < N; i++) {
       double coef = 0;
       for (std::size_t j = 0; j < N + 1; j++) {
-        const double x = std::cos(M_PI * ((static_cast<double>(j) + 0.5) / static_cast<double>(N + 1)));
+        const double x = cos(M_PI * ((static_cast<double>(j) + 0.5) / static_cast<double>(N + 1)));
         coef += f(x) * cheb_poly(i, x);
       }
       result[i] = 2 * coef / static_cast<double>(N + 1);

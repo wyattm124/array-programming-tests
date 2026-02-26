@@ -1,5 +1,5 @@
-#include "../src/fft.hpp"
 #include "fft_comp_unit.hpp"
+#include "../src/fft.hpp"
 #include <benchmark/benchmark.h>
 #include <fftw3.h>
 
@@ -11,13 +11,15 @@ class Case : public benchmark::Fixture {
 public:
     constexpr static unsigned int N = M;
 protected:
-    std::array<std::complex<float>, N> time_domain;
-    std::array<std::complex<float>, N> freq_domain;
+    alignas(MY_MAX_ALIGNMENT) std::complex<float> time_domain[N];
+    alignas(MY_MAX_ALIGNMENT) std::complex<float> freq_domain[N];
     
     void SetUp(const benchmark::State& state) {
-        time_domain.fill(0);
-        freq_domain.fill(0);
-        FFT::wave_gen_lcg(time_domain.data(), freq_domain.data(), N);
+        for (unsigned int i = 0; i < N; i++) {
+            time_domain[i] = {0, 0};
+            freq_domain[i] = {0, 0};
+        }
+        FFT::wave_gen_lcg(time_domain, freq_domain, N);
     }
 };
 
@@ -42,14 +44,14 @@ using MersennePrime = Case<8191>;
 
 /// Base Classes for Processing Flows
 template <unsigned long N>
-void process_fftw(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
+void process_fftw(benchmark::State& state, std::complex<float> (&time_domain)[N]) {
     // Configure input with waves
     fftwf_complex *out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
     fftwf_plan p;
 
     // Set the plan
     p = fftwf_plan_dft_1d(N,
-        reinterpret_cast<fftwf_complex*>(time_domain.data()),
+        reinterpret_cast<fftwf_complex*>(time_domain),
         out, FFTW_FORWARD, FFTW_MEASURE);
 
     // Benchmark
@@ -63,7 +65,7 @@ void process_fftw(benchmark::State& state, std::array<std::complex<float>, N>& t
 }
 
 template <unsigned long N>
-void process_fftw_with_alloc(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
+void process_fftw_with_alloc(benchmark::State& state, std::complex<float> (&time_domain)[N]) {
     // Configure input with waves
     fftwf_complex *in, *out;
     fftwf_plan p;
@@ -80,8 +82,8 @@ void process_fftw_with_alloc(benchmark::State& state, std::array<std::complex<fl
         
         // Copy the input to the appropriate location
         std::copy(
-            reinterpret_cast<const float*>(&time_domain[0]),
-            reinterpret_cast<const float*>(&time_domain[0] + N),
+            reinterpret_cast<const float*>(time_domain),
+            reinterpret_cast<const float*>(time_domain + N),
             reinterpret_cast<float*>(in)
         );
         
@@ -101,6 +103,7 @@ void process_fftw_with_alloc(benchmark::State& state, std::array<std::complex<fl
     }
 }
 
+#ifdef ARCH_ARM
 template <unsigned long N>
 void process_neon(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
     // Need to Copy Data to Correct Type
@@ -117,63 +120,64 @@ void process_neon(benchmark::State& state, std::array<std::complex<float>, N>& t
         FFT::FFTPlan<float32x2_t>::fft<N>(temp_time_domain.data(), temp_freq_domain.data());
     }
 }
+#endif
 
 template <unsigned long N>
-void process_stdcomplexwrap(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
-    std::array<FFT::StdComplexWrap<float>, N> temp_freq_domain;
+void process_stdcomplexwrap(benchmark::State& state, std::complex<float> (&time_domain)[N]) {
+    FFT::StdComplexWrap<float> temp_freq_domain[N];
 
     // Make sure to do initialization
     FFT::FFTPlan<FFT::StdComplexWrap<float>>::Init<N>();
 
     for (auto _ : state) {
         FFT::FFTPlan<FFT::StdComplexWrap<float>>::fft<N>(
-            static_cast<FFT::StdComplexWrap<float>*>(time_domain.data()),
-            temp_freq_domain.data()
+            static_cast<FFT::StdComplexWrap<float>*>(time_domain),
+            temp_freq_domain
         );
     }
 }
 
 template <unsigned long N>
-void process_customcomplex(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
+void process_customcomplex(benchmark::State& state, std::complex<float> (&time_domain)[N]) {
     // Need to Copy Data to Correct Type
-    std::array<FFT::Complex, N> temp_time_domain;
-    std::array<FFT::Complex, N> temp_freq_domain;
+    alignas(MY_MAX_ALIGNMENT) FFT::Complex temp_time_domain[N];
+    alignas(MY_MAX_ALIGNMENT) FFT::Complex temp_freq_domain[N];
     for (unsigned int i = 0; i < N; i++) {
-        temp_time_domain[i] = {time_domain[i]};
+        temp_time_domain[i] = {time_domain[i].real(), time_domain[i].imag()};
     }
 
     // Make sure to do initialization
     FFT::FFTPlan<FFT::Complex>::Init<N>();
 
     for (auto _ : state) {
-        FFT::FFTPlan<FFT::Complex>::fft<N>(temp_time_domain.data(), temp_freq_domain.data());
+        FFT::FFTPlan<FFT::Complex>::fft<N>(temp_time_domain, temp_freq_domain);
     }
 }
 
 template <unsigned long N>
-void process_comp_unit(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
+void process_comp_unit(benchmark::State& state, std::complex<float> (&time_domain)[N]) {
     // Need to Copy Data to Correct Type
-    std::array<FFT::Complex, N> temp_time_domain;
-    std::array<FFT::Complex, N> temp_freq_domain;
+    alignas(MY_MAX_ALIGNMENT) FFT::Complex temp_time_domain[N];
+    alignas(MY_MAX_ALIGNMENT) FFT::Complex temp_freq_domain[N];
     for (unsigned int i = 0; i < N; i++) {
-        temp_time_domain[i] = {time_domain[i]};
+        temp_time_domain[i] = {time_domain[i].real(), time_domain[i].imag()};
     }
 
     for (auto _ : state) {
         if constexpr (N == 2) {
-            FFT::fft_2(temp_time_domain.data(), temp_freq_domain.data());
+            FFT::fft_2(temp_time_domain, temp_freq_domain);
         } else if constexpr (N == 3) {
-            FFT::fft_3(temp_time_domain.data(), temp_freq_domain.data());
+            FFT::fft_3(temp_time_domain, temp_freq_domain);
         } else if constexpr (N == 4) {
-            FFT::fft_4(temp_time_domain.data(), temp_freq_domain.data());
+            FFT::fft_4(temp_time_domain, temp_freq_domain);
         } else if constexpr (N == 5) {
-            FFT::fft_5(temp_time_domain.data(), temp_freq_domain.data());
+            FFT::fft_5(temp_time_domain, temp_freq_domain);
         } else if constexpr (N == 6) {
-            FFT::fft_6(temp_time_domain.data(), temp_freq_domain.data());
+            FFT::fft_6(temp_time_domain, temp_freq_domain);
         } else if constexpr (N == 7) {
-            FFT::fft_7(temp_time_domain.data(), temp_freq_domain.data());
+            FFT::fft_7(temp_time_domain, temp_freq_domain);
         } else if constexpr (N == 8) {
-            FFT::fft_8(temp_time_domain.data(), temp_freq_domain.data());
+            FFT::fft_8(temp_time_domain, temp_freq_domain);
         }
     } 
 }
@@ -234,9 +238,11 @@ BENCHMARK_DEFINE_F(Case8, FFTW)(benchmark::State& state) {
     process_fftw(state, time_domain);
 }
 
+#ifdef ARCH_ARM
 BENCHMARK_DEFINE_F(PowerOf2, Neon)(benchmark::State& state) {
     process_neon(state, time_domain);
 }
+#endif
 
 BENCHMARK_DEFINE_F(PowerOf2, CustomComplex)(benchmark::State& state) {
     process_customcomplex(state, time_domain);
@@ -287,7 +293,9 @@ BENCHMARK_REGISTER_F(Case8, CompUnitComplex);
 BENCHMARK_REGISTER_F(Case8, FFTW);
 
 // Power of 2 Benchmarks
+#ifdef ARCH_ARM
 BENCHMARK_REGISTER_F(PowerOf2, Neon);
+#endif
 BENCHMARK_REGISTER_F(PowerOf2, CustomComplex);
 BENCHMARK_REGISTER_F(PowerOf2, FFTW);
 BENCHMARK_REGISTER_F(PowerOf2, FFTWWithAlloc);

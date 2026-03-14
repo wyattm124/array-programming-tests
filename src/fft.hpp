@@ -5,6 +5,9 @@
 
 #include "prime_factor.hpp"
 
+// TODO: Conditional include on ARCH_x86_64
+#include <immintrin.h>
+
 /// TODO:
 /// (1) - May want base cases for 9 and 10
 /// (2) - Implement Rader's algorithm for small prime numbers, especially 11, 13, 17 and 19
@@ -173,7 +176,11 @@ namespace FFT {
             if constexpr (FFTRecurseLayer<N,N>::base_case) {
                 // If we are already at a base case, then we just need to do a straightforward
                 //  DFT.
-                DFT<N, forward>::execute(in, out);
+                if constexpr (N == 8) {
+                    DFT_AVX2_8x1<forward>::execute(in, out);
+                } else {
+                    DFT<N, forward>::execute(in, out);
+                }
 
                 for (int i = 0; i < N; i++) {
                     out[i] = forward ? (out[i] / static_cast<float>(N)) : conj(out[i]);
@@ -183,6 +190,11 @@ namespace FFT {
                 alignas(MY_CPU_LOAD_SIZE) T temp[N];
                 constexpr unsigned int A = FFTRecurseLayer<N,N>::A;
                 constexpr unsigned int B = FFTRecurseLayer<N,N>::B;
+                __m256i indices = _mm256_set_epi32(
+                    B*6 + 1, B*6 + 0,
+                    B*4 + 1, B*4 + 0,
+                    B*2 + 1, B*2 + 0,
+                    1, 0);
                 for (unsigned int i = 0; i < B; i++) {
                     /* Transpose input data around the first radix A
                      *  to create B bins of size A.
@@ -209,10 +221,18 @@ namespace FFT {
                      *  used to load the input into an array the FFT can write over
                      *  as workspace memory.
                      */
-                        
-                    for (unsigned int j = 0; j < A; j++) {
-                        out[i * A + j] = forward ? in[i + j * B] : conj(in[i + j * B]);
-                    } 
+                    if constexpr (forward && A == 8) {
+                        // Cast to float* since Complex is 2 floats, gather 4 complex numbers (8 floats)
+                        const float* base_ptr = reinterpret_cast<const float*>(in + i);
+                        __m256 temp_load_1 = _mm256_i32gather_ps(base_ptr, indices, sizeof(float));
+                        __m256 temp_load_2 = _mm256_i32gather_ps(base_ptr + 4 * B * 2, indices, sizeof(float));
+                        _mm256_store_ps(reinterpret_cast<float*>(out + i * A), temp_load_1);
+                        _mm256_store_ps(reinterpret_cast<float*>(out + i * A + 4), temp_load_2);
+                    } else { 
+                        for (unsigned int j = 0; j < A; j++) {
+                            out[i * A + j] = forward ? in[i + j * B] : conj(in[i + j * B]);
+                        }
+                    }
                 }
                 FFTRecurseLayer<N,N>::fft_recurse(out, temp);
                 transpose<N, 1, forward>(temp, out);
@@ -267,6 +287,18 @@ namespace FFT {
                 const T &x_1 = forward ? in[1] : conj(in[1]);
                 out[0] = x_0 + x_1;
                 out[1] = x_0 - x_1;
+                return;
+            }
+        };
+
+        struct DFT_AVX2_forward_2x2 {
+            static void execute(float *__restrict__ in, float *__restrict__ out) noexcept {
+                static const __m256 neg_mask = _mm256_set_ps(0.0f, 0.0f, -0.0f,-0.0f, 0.0f, 0.0f, -0.0f, -0.0f);
+                static const __m256i flipper_indices = _mm256_set_epi32(2, 3, 0, 1, 6, 7, 4, 5);
+                
+                const __m256 x = _mm256_load_ps(in);
+                const __m256 res = _mm256_add_ps(_mm256_xor_ps(x, neg_mask), _mm256_permutevar8x32_ps(x, flipper_indices));
+                _mm256_store_ps(out, res);
                 return;
             }
         };
@@ -467,6 +499,80 @@ namespace FFT {
                 return;
             }
         };
+        
+        template<bool forward>
+        struct DFT_AVX2_8x1 {
+            static void Init() {}
+            static void execute(T *__restrict__ in_unaligned, T *__restrict__ out_unaligned) noexcept {
+                MCA_START;
+                T *in = static_cast<T *>(__builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
+                T *out = static_cast<T *>(__builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
+                static constexpr float c = 0.707106781187f;
+                static constexpr T eighth_root = {c, c};
+                static constexpr auto fourth_root = [](T x){
+                    return T{x[1], -x[0]};
+                };
+                static constexpr auto neg_fourth_root = [](T x){
+                    return T{-x[1],  x[0]};
+                };
+                static constexpr auto negate = [](T x){
+                    return T{-x[0], -x[1]};
+                };
+                // __m256 a_0
+                const T &a_0_0 = forward ? in[0] : conj(in[0]);
+                const T &a_0_1 = forward ? in[1] : conj(in[1]);
+                const T &a_0_2 = forward ? in[2] : conj(in[2]);
+                const T &a_0_3 = forward ? in[3] : conj(in[3]);
+
+                // __m256 a_1
+                const T &a_1_0 = forward ? in[4] : conj(in[4]);
+                const T &a_1_1 = forward ? in[5] : conj(in[5]);
+                const T &a_1_2 = forward ? in[6] : conj(in[6]);
+                const T &a_1_3 = forward ? in[7] : conj(in[7]);
+                {
+                    // __m256 b_0
+                    const T &b_0_0 = a_0_0 + a_1_0;
+                    const T &b_0_1 = a_0_2 + a_1_2;
+                    const T &b_0_2 = a_0_1 + a_1_1;
+                    const T &b_0_3 = a_0_3 + a_1_3;
+                    {
+                        // __m256 c_0
+                        const T &c_0_0 = b_0_0 - b_0_1;
+                        const T &c_0_1 = b_0_1 + b_0_0;
+                        const T &c_0_2 = fourth_root(b_0_2 - b_0_3);
+                        const T &c_0_3 = b_0_3 + b_0_2;
+                        { 
+                            out[0] = c_0_3 + c_0_1;
+                            out[2] = c_0_2 + c_0_0;
+                            out[4] = c_0_1 - c_0_3;
+                            out[6] = c_0_0 - c_0_2;
+                        }
+                    } 
+                }
+                {
+                    // __m256 b_1
+                    const T &b_1_0 = a_0_0 - a_1_0;
+                    const T &b_1_1 = m(a_0_1 - a_1_1, eighth_root);
+                    const T &b_1_2 = fourth_root(a_0_2 - a_1_2);
+                    const T &b_1_3 = m(a_0_3 - a_1_3, eighth_root);
+                    {
+                        // __m256 c_1
+                        const T &c_1_0 = b_1_0 - b_1_2;
+                        const T &c_1_1 = fourth_root(b_1_1) - b_1_3;
+                        const T &c_1_2 = b_1_2 + b_1_0;
+                        const T &c_1_3 = fourth_root(b_1_3) - b_1_1;
+                        {
+                            out[1] = c_1_2 + c_1_1;
+                            out[3] = c_1_0 + c_1_3;
+                            out[5] = c_1_2 - c_1_1;
+                            out[7] = c_1_0 - c_1_3; 
+                        }
+                    }
+                }
+                MCA_END;
+                return;
+            }
+        };
 
         template<unsigned int N, unsigned int S, bool forward>
         static void transpose(T *__restrict__ in, T *__restrict__ out) noexcept {
@@ -526,8 +632,19 @@ namespace FFT {
 
             static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
                 // Do the A sized FFT on each bin
-                for (unsigned int i = 0; i < L/A; i++) {
-                    DFT<A, true>::execute(in + (i * A), out + (i * A));
+                if constexpr (A == 2 && L % (A*2) == 0) {
+                    #pragma ivdep
+                    for (unsigned int i = 0; i < L/(A*2); i++) {
+                        DFT_AVX2_forward_2x2::execute(reinterpret_cast<float*>(in + (i * A * 2)), reinterpret_cast<float*>(out + (i * A * 2)));
+                    }
+                } else {
+                    for (unsigned int i = 0; i < L/A; i++) {
+                        if constexpr (A == 8) {
+                            DFT_AVX2_8x1<true>::execute(in + (i * A), out + (i * A));
+                        } else {
+                            DFT<A, true>::execute(in + (i * A), out + (i * A));
+                        }
+                    }
                 }
 
                 if constexpr (!base_case) {

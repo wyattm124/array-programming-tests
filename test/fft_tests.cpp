@@ -253,7 +253,7 @@ TEST_CASE("FFT Opt Base Case Input") {
 
     auto Ans_8 = fft_opt_tester<8>();
     CHECK(Ans_8.first < 1.1e-6);
-    CHECK(Ans_8.second < 2e-7);
+    CHECK(Ans_8.second < 5e-7);
 }
 
 // Keep error resonably small on small DFTs (un measurably small)

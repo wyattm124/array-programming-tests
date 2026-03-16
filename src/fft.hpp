@@ -508,15 +508,9 @@ namespace FFT {
                 T *in = static_cast<T *>(__builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
                 T *out = static_cast<T *>(__builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
                 static constexpr float c = 0.707106781187f;
-                static constexpr T eighth_root = {c, c};
+                static constexpr T eighth_root_conj = {c, -c};
                 static constexpr auto fourth_root = [](T x){
                     return T{x[1], -x[0]};
-                };
-                static constexpr auto neg_fourth_root = [](T x){
-                    return T{-x[1],  x[0]};
-                };
-                static constexpr auto negate = [](T x){
-                    return T{-x[0], -x[1]};
                 };
                 // __m256 a_0
                 const T &a_0_0 = forward ? in[0] : conj(in[0]);
@@ -532,43 +526,40 @@ namespace FFT {
                 {
                     // __m256 b_0
                     const T &b_0_0 = a_0_0 + a_1_0;
-                    const T &b_0_1 = a_0_2 + a_1_2;
-                    const T &b_0_2 = a_0_1 + a_1_1;
+                    const T &b_0_1 = a_0_1 + a_1_1;
+                    const T &b_0_2 = a_0_2 + a_1_2;
                     const T &b_0_3 = a_0_3 + a_1_3;
-                    {
-                        // __m256 c_0
-                        const T &c_0_0 = b_0_0 - b_0_1;
-                        const T &c_0_1 = b_0_1 + b_0_0;
-                        const T &c_0_2 = fourth_root(b_0_2 - b_0_3);
-                        const T &c_0_3 = b_0_3 + b_0_2;
-                        { 
-                            out[0] = c_0_3 + c_0_1;
-                            out[2] = c_0_2 + c_0_0;
-                            out[4] = c_0_1 - c_0_3;
-                            out[6] = c_0_0 - c_0_2;
-                        }
-                    } 
-                }
-                {
+                    
                     // __m256 b_1
                     const T &b_1_0 = a_0_0 - a_1_0;
-                    const T &b_1_1 = m(a_0_1 - a_1_1, eighth_root);
+                    const T &b_1_1 = m(a_0_1 - a_1_1, eighth_root_conj);
                     const T &b_1_2 = fourth_root(a_0_2 - a_1_2);
-                    const T &b_1_3 = m(a_0_3 - a_1_3, eighth_root);
+                    const T &b_1_3 = m(a_0_3 - a_1_3, eighth_root_conj);
                     {
+                        // __m256 c_0
+                        const T &c_0_0 = b_0_0 - b_0_2;
+                        const T &c_0_1 = b_0_0 + b_0_2;
+                        const T &c_0_2 = fourth_root(b_0_1 - b_0_3);
+                        const T &c_0_3 = b_0_1 + b_0_3;
+                        
                         // __m256 c_1
                         const T &c_1_0 = b_1_0 - b_1_2;
-                        const T &c_1_1 = fourth_root(b_1_1) - b_1_3;
+                        const T &c_1_1 = b_1_1 + fourth_root(b_1_3);
                         const T &c_1_2 = b_1_2 + b_1_0;
-                        const T &c_1_3 = fourth_root(b_1_3) - b_1_1;
-                        {
+                        const T &c_1_3 = b_1_3 + fourth_root(b_1_1);
+                        { 
+                            out[0] = c_0_1 + c_0_3;
                             out[1] = c_1_2 + c_1_1;
+                            out[2] = c_0_0 + c_0_2;
                             out[3] = c_1_0 + c_1_3;
+
+                            out[4] = c_0_1 - c_0_3;
                             out[5] = c_1_2 - c_1_1;
+                            out[6] = c_0_0 - c_0_2;
                             out[7] = c_1_0 - c_1_3; 
                         }
-                    }
-                }
+                    } 
+                } 
                 MCA_END;
                 return;
             }

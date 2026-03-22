@@ -26,6 +26,15 @@ constexpr unsigned int MY_MAX_ALIGNMENT = MY_CPU_LOAD_SIZE > MY_MAX_SIMD_SIZE ? 
 
 namespace FFT {
 
+    /// XOR sign-flip masks for `DFT_AVX2_8x1` (bit pattern 0x80000000 == IEEE -0.f).
+    namespace detail_avx2_dft8 {
+        // TODO : just to show best way to store a mask, should be replaced with necessary masks
+        alignas(32) inline constexpr float test_mask[] = {
+            0.0f, -0.0f, 0.0f, -0.0f,
+            0.0f, -0.0f, 0.0f, -0.0f
+        }; 
+    } // namespace detail_avx2_dft8
+
     /// Signal generation for generating an FFT input with the corresponding expected output.
     constexpr double TwoPI = 2.0 * M_PI;
     
@@ -441,77 +450,16 @@ namespace FFT {
         struct DFT<8, forward> {
             static void Init() {}
             static void execute(T *__restrict__ in_unaligned, T *__restrict__ out_unaligned) noexcept {
-                MCA_START;
                 T *in = static_cast<T *>(__builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
                 T *out = static_cast<T *>(__builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
                 static constexpr float c = 0.707106781187f;
-                static constexpr T eighth_root = {c,c};
-                static constexpr auto forth_root = [](T x){
-                    return T{x[1], -x[0]};
-                };
-                const T &x_0 = forward ? in[0] : conj(in[0]);
-                const T &x_1 = forward ? in[1] : conj(in[1]);
-                const T &x_2 = forward ? in[2] : conj(in[2]);
-                const T &x_3 = forward ? in[3] : conj(in[3]);
-                const T &x_4 = forward ? in[4] : conj(in[4]);
-                const T &x_5 = forward ? in[5] : conj(in[5]);
-                const T &x_6 = forward ? in[6] : conj(in[6]);
-                const T &x_7 = forward ? in[7] : conj(in[7]);
-                {
-                    const T &a_0 = x_0 + x_4;
-                    const T &a_1 = x_2 + x_6;
-                    const T &b_0 = x_1 + x_5;
-                    const T &b_1 = x_3 + x_7;
-                    { // 0 and 4 index, based on 2 DFTs of size 4 + shifted for index 2 and 6
-                        const T &a = a_0 + a_1;
-                        const T &b = b_0 + b_1;
-                        out[0] = a + b;
-                        out[4] = a - b;
-                    }
-                    { // 2 and 6 index, based on 2 DFTs of size 4 + shifted for index 0 and 4
-                        const T &a = a_0 - a_1;
-                        const T &b_p = b_0 - b_1;
-                        const T &b = forth_root(b_p);
-                        out[2] = a + b;
-                        out[6] = a - b;
-                    }
-                }
-                {
-                    const T &a_0 = x_0 - x_4;
-                    const T &a_1_p = x_2 - x_6;
-                    const T &a_1 = forth_root(a_1_p);
-                    { // index 3 and 5
-                        const T &b_0_p = x_1 - x_5;
-                        const T &b_0 = forth_root(b_0_p);
-                        const T &b_1 = x_3 - x_7;
-                        out[3] = (a_0 - a_1) + mc(b_1 + b_0, eighth_root);
-                        out[5] = (a_0 + a_1) + m(b_1 - b_0, eighth_root);
-                    }
-                    { // DFT for index 1 and 7
-                        const T &b_0 = x_1 - x_5;
-                        const T &b_1_p = x_3 - x_7;
-                        const T &b_1 = forth_root(b_1_p);
-                        out[1] = (a_0 + a_1) + mc(b_0 + b_1, eighth_root);
-                        out[7] = (a_0 - a_1) + m(b_0 - b_1, eighth_root); 
-                    }
-                }
-                MCA_END;
-                return;
-            }
-        };
-        
-        template<bool forward>
-        struct DFT_AVX2_8x1 {
-            static void Init() {}
-            static void execute(T *__restrict__ in_unaligned, T *__restrict__ out_unaligned) noexcept {
-                MCA_START;
-                T *in = static_cast<T *>(__builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
-                T *out = static_cast<T *>(__builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
-                static constexpr float c = 0.707106781187f;
+                static constexpr T eighth_root = {c, c};
                 static constexpr T eighth_root_conj = {c, -c};
+                static constexpr T neg_eighth_root = {-c, -c};
                 static constexpr auto fourth_root = [](T x){
                     return T{x[1], -x[0]};
                 };
+ 
                 // __m256 a_0
                 const T &a_0_0 = forward ? in[0] : conj(in[0]);
                 const T &a_0_1 = forward ? in[1] : conj(in[1]);
@@ -532,31 +480,98 @@ namespace FFT {
                     
                     // __m256 b_1
                     const T &b_1_0 = a_0_0 - a_1_0;
-                    const T &b_1_1 = m(a_0_1 - a_1_1, eighth_root_conj);
-                    const T &b_1_2 = fourth_root(a_0_2 - a_1_2);
-                    const T &b_1_3 = m(a_0_3 - a_1_3, eighth_root_conj);
+                    const T &b_1_1 = a_0_1 - a_1_1;
+                    const T &b_1_2 = a_0_2 - a_1_2;
+                    const T &b_1_3 = a_0_3 - a_1_3;
                     {
                         // __m256 c_0
-                        const T &c_0_0 = b_0_0 - b_0_2;
-                        const T &c_0_1 = b_0_0 + b_0_2;
-                        const T &c_0_2 = fourth_root(b_0_1 - b_0_3);
-                        const T &c_0_3 = b_0_1 + b_0_3;
+                        const T &c_0_0 = b_0_0 + b_0_2;
+                        const T &c_0_1 = b_0_0 - b_0_2;
+                        const T &c_0_2 = b_0_1 + b_0_3;
+                        const T &c_0_3 = b_0_1 - b_0_3;
                         
                         // __m256 c_1
-                        const T &c_1_0 = b_1_0 - b_1_2;
-                        const T &c_1_1 = b_1_1 + fourth_root(b_1_3);
-                        const T &c_1_2 = b_1_2 + b_1_0;
-                        const T &c_1_3 = b_1_3 + fourth_root(b_1_1);
+                        const T &c_1_0 = b_1_0 + fourth_root(b_1_2);
+                        const T &c_1_1 = b_1_0 - fourth_root(b_1_2);
+                        const T &c_1_2 = b_1_1 + fourth_root(b_1_3);
+                        const T &c_1_3 = b_1_1 - fourth_root(b_1_3);
                         { 
-                            out[0] = c_0_1 + c_0_3;
-                            out[1] = c_1_2 + c_1_1;
-                            out[2] = c_0_0 + c_0_2;
-                            out[3] = c_1_0 + c_1_3;
+                            out[0] = c_0_0 + c_0_2;
+                            out[1] = c_1_0 + m(c_1_2, eighth_root_conj);
+                            out[2] = c_0_1 + fourth_root(c_0_3);
+                            out[3] = c_1_1 + m(c_1_3, neg_eighth_root);
 
-                            out[4] = c_0_1 - c_0_3;
-                            out[5] = c_1_2 - c_1_1;
-                            out[6] = c_0_0 - c_0_2;
-                            out[7] = c_1_0 - c_1_3; 
+                            out[4] = c_0_0 - c_0_2;
+                            out[5] = c_1_0 - m(c_1_2, eighth_root_conj);
+                            out[6] = c_0_1 - fourth_root(c_0_3);
+                            out[7] = c_1_1 - m(c_1_3, neg_eighth_root); 
+                        }
+                    } 
+                } 
+                return;
+            }
+        };
+
+        template<bool forward>
+        struct DFT_AVX2_8x1 {
+            static void Init() {}
+            static void execute(T *__restrict__ in_unaligned, T *__restrict__ out_unaligned) noexcept {
+                MCA_START;
+                T *in = static_cast<T *>(__builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
+                T *out = static_cast<T *>(__builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
+                static constexpr float c = 0.707106781187f;
+                static constexpr T eighth_root = {c, c};
+                static constexpr T eighth_root_conj = {c, -c};
+                static constexpr T neg_eighth_root = {-c, -c};
+                static constexpr auto fourth_root = [](T x){
+                    return T{x[1], -x[0]};
+                };
+ 
+                // __m256 a_0
+                const T &a_0_0 = forward ? in[0] : conj(in[0]);
+                const T &a_0_1 = forward ? in[1] : conj(in[1]);
+                const T &a_0_2 = forward ? in[2] : conj(in[2]);
+                const T &a_0_3 = forward ? in[3] : conj(in[3]);
+
+                // __m256 a_1
+                const T &a_1_0 = forward ? in[4] : conj(in[4]);
+                const T &a_1_1 = forward ? in[5] : conj(in[5]);
+                const T &a_1_2 = forward ? in[6] : conj(in[6]);
+                const T &a_1_3 = forward ? in[7] : conj(in[7]);
+                {
+                    // __m256 b_0
+                    const T &b_0_0 = a_0_0 + a_1_0;
+                    const T &b_0_1 = a_0_1 + a_1_1;
+                    const T &b_0_2 = a_0_2 + a_1_2;
+                    const T &b_0_3 = a_0_3 + a_1_3;
+                    
+                    // __m256 b_1
+                    const T &b_1_0 = a_0_0 - a_1_0;
+                    const T &b_1_1 = a_0_1 - a_1_1;
+                    const T &b_1_2 = a_0_2 - a_1_2;
+                    const T &b_1_3 = a_0_3 - a_1_3;
+                    {
+                        // __m256 c_0
+                        const T &c_0_0 = b_0_0 + b_0_2;
+                        const T &c_0_1 = b_0_0 - b_0_2;
+                        const T &c_0_2 = b_0_1 + b_0_3;
+                        const T &c_0_3 = b_0_1 - b_0_3;
+                        
+                        // __m256 c_1
+                        const T &c_1_0 = b_1_0 + fourth_root(b_1_2);
+                        const T &c_1_1 = b_1_0 - fourth_root(b_1_2);
+                        const T &c_1_2 = b_1_1 + fourth_root(b_1_3);
+                        const T &c_1_3 = b_1_1 - fourth_root(b_1_3);
+                        { 
+                            out[0] = c_0_0 + c_0_2;
+                            out[1] = c_1_0 + m(c_1_2, eighth_root_conj);
+                            out[2] = c_0_1 + fourth_root(c_0_3);
+                            out[3] = c_1_1 + m(c_1_3, neg_eighth_root);
+
+                            out[4] = c_0_0 - c_0_2;
+                            out[5] = c_1_0 - m(c_1_2, eighth_root_conj);
+                            out[6] = c_0_1 - fourth_root(c_0_3);
+                            out[7] = c_1_1 - m(c_1_3, neg_eighth_root); 
                         }
                     } 
                 } 

@@ -1,9 +1,9 @@
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <doctest/doctest.h>
+
 #include "../src/fft.hpp"
 #include "../src/complex_types.hpp"
 #include <fftw3.h>
-
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#include <doctest/doctest.h>
 #include <iomanip>
 #include <algorithm>
 

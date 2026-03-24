@@ -28,11 +28,35 @@ namespace FFT {
 
     /// XOR sign-flip masks for `DFT_AVX2_8x1` (bit pattern 0x80000000 == IEEE -0.f).
     namespace detail_avx2_dft8 {
-        // TODO : just to show best way to store a mask, should be replaced with necessary masks
-        alignas(32) inline constexpr float test_mask[] = {
-            0.0f, -0.0f, 0.0f, -0.0f,
-            0.0f, -0.0f, 0.0f, -0.0f
-        }; 
+        // Eighth root of unity, real and imaginary part
+        constexpr float c = 0.707106781187f;
+
+        // mask for identity and negation
+        constexpr float keep = 0.0f;
+        constexpr float neg = -0.0f;
+
+        alignas(32) inline constexpr float conj_all_mask[] = {
+            keep, neg, keep, neg,
+            keep, neg, keep, neg
+        };
+        alignas(32) inline constexpr float c_0_mask[8] = {
+            keep, keep, neg, neg,
+            keep, keep, neg, neg
+        };
+        alignas(32) inline constexpr float c_1_mask[8] = {
+            keep, neg, neg, keep,
+            keep, neg, neg, keep
+        };
+
+        // Final mix
+        alignas(32) inline constexpr float orig_mult[8] = {
+            1.0f, 1.0f, c, c,
+            0.0f, 0.0f, -c, -c
+        };
+        alignas(32) inline constexpr float flip_mult[8] = {
+            0.0f, 0.0f, c, -c,
+            1.0f, -1.0f, c, -c
+        };
     } // namespace detail_avx2_dft8
 
     /// Signal generation for generating an FFT input with the corresponding expected output.
@@ -515,63 +539,42 @@ namespace FFT {
         template<bool forward>
         struct DFT_AVX2_8x1 {
             static void Init() {}
-            static void execute(T *__restrict__ in_unaligned, T *__restrict__ out_unaligned) noexcept {
+            static void execute(T *__restrict__ in, T *__restrict__ out) noexcept { 
                 MCA_START;
-                T *in = static_cast<T *>(__builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
-                T *out = static_cast<T *>(__builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
-                static constexpr float c = 0.707106781187f;
-                static constexpr T eighth_root = {c, c};
-                static constexpr T eighth_root_conj = {c, -c};
-                static constexpr T neg_eighth_root = {-c, -c};
-                static constexpr auto fourth_root = [](T x){
-                    return T{x[1], -x[0]};
-                };
- 
-                // __m256 a_0
-                const T &a_0_0 = forward ? in[0] : conj(in[0]);
-                const T &a_0_1 = forward ? in[1] : conj(in[1]);
-                const T &a_0_2 = forward ? in[2] : conj(in[2]);
-                const T &a_0_3 = forward ? in[3] : conj(in[3]);
+                __m256 a_0 = _mm256_load_ps(reinterpret_cast<float*>(in));
+                __m256 a_1 = _mm256_load_ps(reinterpret_cast<float*>(in + 4));
 
-                // __m256 a_1
-                const T &a_1_0 = forward ? in[4] : conj(in[4]);
-                const T &a_1_1 = forward ? in[5] : conj(in[5]);
-                const T &a_1_2 = forward ? in[6] : conj(in[6]);
-                const T &a_1_3 = forward ? in[7] : conj(in[7]);
+                if constexpr (!forward) {
+                    a_0 = _mm256_xor_ps(a_0, _mm256_load_ps(detail_avx2_dft8::conj_all_mask));
+                    a_1 = _mm256_xor_ps(a_1, _mm256_load_ps(detail_avx2_dft8::conj_all_mask));
+                } 
+                
                 {
-                    // __m256 b_0
-                    const T &b_0_0 = a_0_0 + a_1_0;
-                    const T &b_0_1 = a_0_1 + a_1_1;
-                    const T &b_0_2 = a_0_2 + a_1_2;
-                    const T &b_0_3 = a_0_3 + a_1_3;
-                    
-                    // __m256 b_1
-                    const T &b_1_0 = a_0_0 - a_1_0;
-                    const T &b_1_1 = a_0_1 - a_1_1;
-                    const T &b_1_2 = a_0_2 - a_1_2;
-                    const T &b_1_3 = a_0_3 - a_1_3;
-                    {
-                        // __m256 c_0
-                        const T &c_0_0 = b_0_0 + b_0_2;
-                        const T &c_0_1 = b_0_0 - b_0_2;
-                        const T &c_0_2 = b_0_1 + b_0_3;
-                        const T &c_0_3 = b_0_1 - b_0_3;
-                        
-                        // __m256 c_1
-                        const T &c_1_0 = b_1_0 + fourth_root(b_1_2);
-                        const T &c_1_1 = b_1_0 - fourth_root(b_1_2);
-                        const T &c_1_2 = b_1_1 + fourth_root(b_1_3);
-                        const T &c_1_3 = b_1_1 - fourth_root(b_1_3);
-                        { 
-                            out[0] = c_0_0 + c_0_2;
-                            out[1] = c_1_0 + m(c_1_2, eighth_root_conj);
-                            out[2] = c_0_1 + fourth_root(c_0_3);
-                            out[3] = c_1_1 + m(c_1_3, neg_eighth_root);
+                    const __m256 b_0 = _mm256_add_ps(a_0, a_1);
+                    const __m256 b_1 = _mm256_sub_ps(a_0, a_1); 
 
-                            out[4] = c_0_0 - c_0_2;
-                            out[5] = c_1_0 - m(c_1_2, eighth_root_conj);
-                            out[6] = c_0_1 - fourth_root(c_0_3);
-                            out[7] = c_1_1 - m(c_1_3, neg_eighth_root); 
+                    {
+                        const __m256 c_0 = _mm256_add_ps(
+                            _mm256_permute4x64_pd(_mm256_castps_pd(b_0), 0x50),
+                            _mm256_xor_ps(_mm256_permute4x64_pd(_mm256_castps_pd(b_0), 0xFA), _mm256_load_ps(detail_avx2_dft8::c_0_mask)));
+                        
+                        const __m256 c_1 = _mm256_add_ps(
+                            _mm256_permute4x64_pd(_mm256_castps_pd(b_1), 0x50),
+                            _mm256_xor_ps(_mm256_permute_ps(_mm256_permute4x64_pd(_mm256_castps_pd(b_1), 0xFA), 0xB1),
+                                          _mm256_load_ps(detail_avx2_dft8::c_1_mask))); 
+
+                        {
+                            const __m256 temp_d_0 = _mm256_unpacklo_pd(c_0, c_1);
+                            const __m256 temp_temp_d_1 = _mm256_unpackhi_pd(c_0, c_1);
+                            const __m256 d_0 = _mm256_permute2f128_pd(temp_d_0, temp_temp_d_1, 0x20);
+                            const __m256 temp_d_1 = _mm256_permute2f128_pd(temp_d_0, temp_temp_d_1, 0x31); 
+
+                            const __m256 d_1 = _mm256_fmadd_ps(temp_d_1, _mm256_load_ps(detail_avx2_dft8::orig_mult),
+                                _mm256_mul_ps(_mm256_permute_ps(temp_d_1, 0xB1), _mm256_load_ps(detail_avx2_dft8::flip_mult)));
+                             
+                            // Store result
+                            _mm256_store_ps(reinterpret_cast<float*>(out), _mm256_add_ps(d_0, d_1));
+                            _mm256_store_ps(reinterpret_cast<float*>(out + 4), _mm256_sub_ps(d_0, d_1));
                         }
                     } 
                 } 

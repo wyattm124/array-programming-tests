@@ -167,11 +167,12 @@ void populate_twiddle_factors_by_angle(T *factors) {
   }
 }
 
-template <typename T> class FFTPlan {
+template <typename T, SIMD_TYPE plan_simd = SIMD_TYPE::NONE> class FFTPlan {
 public:
   // Multiplication op aliases for type parameter
   static constexpr auto m = mult<T>;
   static constexpr auto mc = mult_conj<T>;
+  static constexpr SIMD_TYPE dft_simd = plan_simd;
 
   // Layers need to be initialized recursively to populate
   //  their corresponding coefficient arrays.
@@ -217,7 +218,7 @@ private:
       // If we are already at a base case, then we just need to do a
       // straightforward
       //  DFT.
-      DFTLayer<N, N, forward>::execute(in, out);
+      DFTLayer<N, N, forward, dft_simd>::execute(in, out);
 
       for (int i = 0; i < N; i++) {
         out[i] = forward ? (out[i] / static_cast<float>(N)) : conj(out[i]);
@@ -267,362 +268,12 @@ private:
     return;
   }
 
-  // A full DFT done by simple matrix multiplication with the appropriate DFT
-  // matrix.
-  //  Specific sizes are specialized and optimized as appropriate.
-  template <unsigned int L, unsigned int F, bool forward> struct DFTLayer {
-    static void Init() {
-      // Ensure the coeffs are calculated
-      volatile T *coefs = FFTPlan<T>::get_dft_matrix_by_angle<F>();
-    }
+  template <unsigned int L, unsigned int F, bool forward,
+            SIMD_TYPE simd = SIMD_TYPE::NONE>
+  struct DFTLayer;
 
-    static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-      for (unsigned int i = 0; i < L / F; i++) {
-        dft(in + i * F, out + i * F);
-      }
-    }
-
-    // Simply compute the multiplication of the input array (vector) by
-    //  by the DFT matrix.
-    static void dft(T *__restrict__ in, T *__restrict__ out) noexcept {
-      static T *dft_matrix = static_cast<T *>(__builtin_assume_aligned(
-          FFTPlan<T>::get_dft_matrix_by_angle<F>(), MY_CPU_LOAD_SIZE));
-
-      for (unsigned int i = 0; i < F; i++) {
-        T temp_ans = {0, 0};
-        for (unsigned int j = 0; j < F; j++) {
-          temp_ans += m(forward ? in[j] : conj(in[j]), dft_matrix[i * F + j]);
-        }
-        out[i] = temp_ans;
-      }
-    }
-  };
-
-  // Hand written DFT cases serve as base cases for recursive Cooley Tookey
-  template <unsigned int L, bool forward> struct DFTLayer<L, 1, forward> {
-    static void Init() {
-      // This init should never be called, as this FFTRecurseLayer should never
-      // be used
-      static_assert(false);
-    }
-    static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-      // All base cases should avoid the need for this trivial specialization
-      static_assert(false);
-    }
-  };
-
-  template <unsigned int L, bool forward> struct DFTLayer<L, 2, forward> {
-    static void Init() {}
-    static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-      for (unsigned int i = 0; i < L / 2; i++) {
-        dft(in + i * 2, out + i * 2);
-      }
-    }
-    static void dft(T *__restrict__ in, T *__restrict__ out) noexcept {
-      const T &x_0 = forward ? in[0] : conj(in[0]);
-      const T &x_1 = forward ? in[1] : conj(in[1]);
-      out[0] = x_0 + x_1;
-      out[1] = x_0 - x_1;
-      return;
-    }
-  };
-
-  struct DFT_AVX2_forward_2x2 {
-    static void execute(float *__restrict__ in,
-                        float *__restrict__ out) noexcept {
-      static const __m256 neg_mask =
-          _mm256_set_ps(0.0f, 0.0f, -0.0f, -0.0f, 0.0f, 0.0f, -0.0f, -0.0f);
-      static const __m256i flipper_indices =
-          _mm256_set_epi32(2, 3, 0, 1, 6, 7, 4, 5);
-
-      const __m256 x = _mm256_load_ps(in);
-      const __m256 res =
-          _mm256_add_ps(_mm256_xor_ps(x, neg_mask),
-                        _mm256_permutevar8x32_ps(x, flipper_indices));
-      _mm256_store_ps(out, res);
-      return;
-    }
-  };
-
-  template <unsigned int L, bool forward> struct DFTLayer<L, 3, forward> {
-    static void Init() {}
-    static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-      for (unsigned int i = 0; i < L / 3; i++) {
-        dft(in + i * 3, out + i * 3);
-      }
-    }
-    static void dft(T *__restrict__ in, T *__restrict__ out) noexcept {
-      static constexpr T third_root = {-0.5f, -0.866025403784f};
-      const T &x_0 = forward ? in[0] : conj(in[0]);
-      const T &x_1 = forward ? in[1] : conj(in[1]);
-      const T &x_2 = forward ? in[2] : conj(in[2]);
-      out[0] = x_0 + x_1 + x_2;
-      out[1] = x_0 + m(x_1, third_root) + mc(x_2, third_root);
-      out[2] = x_0 + mc(x_1, third_root) + m(x_2, third_root);
-      return;
-    }
-  };
-
-  template <unsigned int L, bool forward> struct DFTLayer<L, 4, forward> {
-    static void Init() {}
-    static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-      for (unsigned int i = 0; i < L / 4; i++) {
-        dft(in + 4 * i, out + i * 4);
-      }
-    }
-    static void dft(T *__restrict__ in, T *__restrict__ out) noexcept {
-      const T &x_0 = forward ? in[0] : conj(in[0]);
-      const T &x_1 = forward ? in[1] : conj(in[1]);
-      const T &x_2 = forward ? in[2] : conj(in[2]);
-      const T &x_3 = forward ? in[3] : conj(in[3]);
-      { // First do evens
-        const T &a = x_0 + x_2;
-        const T &b = x_1 + x_3;
-        out[0] = a + b;
-        out[2] = a - b;
-      }
-      { // Then do odds
-        const T &a = x_0 - x_2;
-        const T &temp_b = x_1 - x_3;
-        const T &b = {temp_b[1], -temp_b[0]};
-        out[1] = a + b;
-        out[3] = a - b;
-      }
-      return;
-    }
-  };
-
-  template <unsigned int L, bool forward> struct DFTLayer<L, 5, forward> {
-    static void Init() {}
-    static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-      for (unsigned int i = 0; i < L / 5; i++) {
-        dft(in + i * 5, out + i * 5);
-      }
-    }
-    static void dft(T *__restrict__ in, T *__restrict__ out) noexcept {
-      static constexpr T root_1 = {0.309016994375, -0.951056516295};
-      static constexpr T root_2 = {-0.809016994375, -0.587785252292};
-      const T &x_0 = forward ? in[0] : conj(in[0]);
-      const T &x_1 = forward ? in[1] : conj(in[1]);
-      const T &x_2 = forward ? in[2] : conj(in[2]);
-      const T &x_3 = forward ? in[3] : conj(in[3]);
-      const T &x_4 = forward ? in[4] : conj(in[4]);
-      out[0] = x_0 + x_1 + x_2 + x_3 + x_4;
-      out[1] = x_0 + m(x_1, root_1) + m(x_2, root_2) + mc(x_3, root_2) +
-               mc(x_4, root_1);
-      out[2] = x_0 + m(x_1, root_2) + mc(x_2, root_1) + m(x_3, root_1) +
-               mc(x_4, root_2);
-      out[3] = x_0 + mc(x_1, root_2) + m(x_2, root_1) + mc(x_3, root_1) +
-               m(x_4, root_2);
-      out[4] = x_0 + mc(x_1, root_1) + mc(x_2, root_2) + m(x_3, root_2) +
-               m(x_4, root_1);
-      return;
-    }
-  };
-
-  template <unsigned int L, bool forward> struct DFTLayer<L, 6, forward> {
-    static void Init() {}
-    static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-      for (unsigned int i = 0; i < L / 6; i++) {
-        dft(in + 6 * i, out + 6 * i);
-      }
-    }
-    static void dft(T *__restrict__ in, T *__restrict__ out) noexcept {
-      static constexpr float r_a = 0.5f;
-      static constexpr float r_b = -0.866025403784f;
-      const T &x_0 = forward ? in[0] : conj(in[0]);
-      const T &x_1 = forward ? in[1] : conj(in[1]);
-      const T &x_2 = forward ? in[2] : conj(in[2]);
-      const T &x_3 = forward ? in[3] : conj(in[3]);
-      const T &x_4 = forward ? in[4] : conj(in[4]);
-      const T &x_5 = forward ? in[5] : conj(in[5]);
-      {
-        const T &a = x_0 + x_2 + x_4;
-        const T &b = x_1 + x_3 + x_5;
-        out[0] = a + b;
-        out[3] = a - b;
-      }
-      {
-        const T &a = x_0 - x_3;
-        const T &b = x_1 - x_4;
-        const T &c = x_2 - x_5;
-        out[1] = a + m(b, T{r_a, r_b}) + m(c, T{-r_a, r_b});
-        out[5] = a + m(b, T{r_a, -r_b}) + m(c, T{-r_a, -r_b});
-      }
-      {
-        const T &a = x_0 + x_3;
-        const T &b = x_1 + x_4;
-        const T &c = x_2 + x_5;
-        out[2] = a + m(b, T{-r_a, r_b}) + m(c, T{-r_a, -r_b});
-        out[4] = a + m(b, T{-r_a, -r_b}) + m(c, T{-r_a, r_b});
-      }
-      return;
-    }
-  };
-
-  template <unsigned int L, bool forward> struct DFTLayer<L, 7, forward> {
-    static void Init() {}
-    static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-      for (unsigned int i = 0; i < L / 7; i++) {
-        dft(in + 7 * i, out + 7 * i);
-      }
-    }
-    static void dft(T *__restrict__ in, T *__restrict__ out) noexcept {
-      static constexpr T r_1 = {0.623489801859, -0.781831482468};
-      static constexpr T r_2 = {-0.222520933956, -0.974927912182};
-      static constexpr T r_3 = {-0.900968867902, -0.433883739118};
-      const T &x_0 = forward ? in[0] : conj(in[0]);
-      const T &x_1 = forward ? in[1] : conj(in[1]);
-      const T &x_2 = forward ? in[2] : conj(in[2]);
-      const T &x_3 = forward ? in[3] : conj(in[3]);
-      const T &x_4 = forward ? in[4] : conj(in[4]);
-      const T &x_5 = forward ? in[5] : conj(in[5]);
-      const T &x_6 = forward ? in[6] : conj(in[6]);
-      out[0] = x_0 + x_1 + x_2 + x_3 + x_4 + x_5 + x_6;
-      out[1] = x_0 + m(x_1, r_1) + m(x_2, r_2) + m(x_3, r_3) + mc(x_4, r_3) +
-               mc(x_5, r_2) + mc(x_6, r_1);
-      out[2] = x_0 + m(x_1, r_2) + mc(x_2, r_3) + mc(x_3, r_1) + m(x_4, r_1) +
-               m(x_5, r_3) + mc(x_6, r_2);
-      out[3] = x_0 + m(x_1, r_3) + mc(x_2, r_1) + m(x_3, r_2) + mc(x_4, r_2) +
-               m(x_5, r_1) + mc(x_6, r_3);
-      out[4] = x_0 + mc(x_1, r_3) + m(x_2, r_1) + mc(x_3, r_2) + m(x_4, r_2) +
-               mc(x_5, r_1) + m(x_6, r_3);
-      out[5] = x_0 + mc(x_1, r_2) + m(x_2, r_3) + m(x_3, r_1) + mc(x_4, r_1) +
-               mc(x_5, r_3) + m(x_6, r_2);
-      out[6] = x_0 + mc(x_1, r_1) + mc(x_2, r_2) + mc(x_3, r_3) + m(x_4, r_3) +
-               m(x_5, r_2) + m(x_6, r_1);
-      return;
-    }
-  };
-
-  template <unsigned int L, bool forward> struct DFTLayer<L, 8, forward> {
-    static void Init() {}
-    static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-      for (unsigned int i = 0; i < L / 8; i++) {
-        dft(in + 8 * i, out + 8 * i);
-      }
-      return;
-    }
-    static void dft(T *__restrict__ in_unaligned,
-                    T *__restrict__ out_unaligned) noexcept {
-      T *in = static_cast<T *>(
-          __builtin_assume_aligned(in_unaligned, MY_MAX_ALIGNMENT));
-      T *out = static_cast<T *>(
-          __builtin_assume_aligned(out_unaligned, MY_MAX_ALIGNMENT));
-      static constexpr float c = 0.707106781187f;
-      static constexpr T eighth_root = {c, c};
-      static constexpr T eighth_root_conj = {c, -c};
-      static constexpr T neg_eighth_root = {-c, -c};
-      static constexpr auto fourth_root = [](T x) { return T{x[1], -x[0]}; };
-
-      // __m256 a_0
-      const T &a_0_0 = forward ? in[0] : conj(in[0]);
-      const T &a_0_1 = forward ? in[1] : conj(in[1]);
-      const T &a_0_2 = forward ? in[2] : conj(in[2]);
-      const T &a_0_3 = forward ? in[3] : conj(in[3]);
-
-      // __m256 a_1
-      const T &a_1_0 = forward ? in[4] : conj(in[4]);
-      const T &a_1_1 = forward ? in[5] : conj(in[5]);
-      const T &a_1_2 = forward ? in[6] : conj(in[6]);
-      const T &a_1_3 = forward ? in[7] : conj(in[7]);
-      {
-        // __m256 b_0
-        const T &b_0_0 = a_0_0 + a_1_0;
-        const T &b_0_1 = a_0_1 + a_1_1;
-        const T &b_0_2 = a_0_2 + a_1_2;
-        const T &b_0_3 = a_0_3 + a_1_3;
-
-        // __m256 b_1
-        const T &b_1_0 = a_0_0 - a_1_0;
-        const T &b_1_1 = a_0_1 - a_1_1;
-        const T &b_1_2 = a_0_2 - a_1_2;
-        const T &b_1_3 = a_0_3 - a_1_3;
-        {
-          // __m256 c_0
-          const T &c_0_0 = b_0_0 + b_0_2;
-          const T &c_0_1 = b_0_0 - b_0_2;
-          const T &c_0_2 = b_0_1 + b_0_3;
-          const T &c_0_3 = b_0_1 - b_0_3;
-
-          // __m256 c_1
-          const T &c_1_0 = b_1_0 + fourth_root(b_1_2);
-          const T &c_1_1 = b_1_0 - fourth_root(b_1_2);
-          const T &c_1_2 = b_1_1 + fourth_root(b_1_3);
-          const T &c_1_3 = b_1_1 - fourth_root(b_1_3);
-          {
-            out[0] = c_0_0 + c_0_2;
-            out[1] = c_1_0 + m(c_1_2, eighth_root_conj);
-            out[2] = c_0_1 + fourth_root(c_0_3);
-            out[3] = c_1_1 + m(c_1_3, neg_eighth_root);
-
-            out[4] = c_0_0 - c_0_2;
-            out[5] = c_1_0 - m(c_1_2, eighth_root_conj);
-            out[6] = c_0_1 - fourth_root(c_0_3);
-            out[7] = c_1_1 - m(c_1_3, neg_eighth_root);
-          }
-        }
-      }
-      return;
-    }
-  };
-
-  template <bool forward> struct DFT_AVX2_8x1 {
-    static void Init() {}
-    static void execute(T *__restrict__ in, T *__restrict__ out) noexcept {
-      MCA_START;
-      __m256 a_0 = _mm256_load_ps(reinterpret_cast<float *>(in));
-      __m256 a_1 = _mm256_load_ps(reinterpret_cast<float *>(in + 4));
-
-      if constexpr (!forward) {
-        a_0 =
-            _mm256_xor_ps(a_0, _mm256_load_ps(detail_avx2_dft8::conj_all_mask));
-        a_1 =
-            _mm256_xor_ps(a_1, _mm256_load_ps(detail_avx2_dft8::conj_all_mask));
-      }
-
-      {
-        const __m256 b_0 = _mm256_add_ps(a_0, a_1);
-        const __m256 b_1 = _mm256_sub_ps(a_0, a_1);
-
-        {
-          const __m256 c_0 = _mm256_add_ps(
-              _mm256_permute4x64_pd(_mm256_castps_pd(b_0), 0x50),
-              _mm256_xor_ps(_mm256_permute4x64_pd(_mm256_castps_pd(b_0), 0xFA),
-                            _mm256_load_ps(detail_avx2_dft8::c_0_mask)));
-
-          const __m256 c_1 = _mm256_add_ps(
-              _mm256_permute4x64_pd(_mm256_castps_pd(b_1), 0x50),
-              _mm256_xor_ps(
-                  _mm256_permute_ps(
-                      _mm256_permute4x64_pd(_mm256_castps_pd(b_1), 0xFA), 0xB1),
-                  _mm256_load_ps(detail_avx2_dft8::c_1_mask)));
-
-          {
-            const __m256 temp_d_0 = _mm256_unpacklo_pd(c_0, c_1);
-            const __m256 temp_temp_d_1 = _mm256_unpackhi_pd(c_0, c_1);
-            const __m256 d_0 =
-                _mm256_permute2f128_pd(temp_d_0, temp_temp_d_1, 0x20);
-            const __m256 temp_d_1 =
-                _mm256_permute2f128_pd(temp_d_0, temp_temp_d_1, 0x31);
-
-            const __m256 d_1 = _mm256_fmadd_ps(
-                temp_d_1, _mm256_load_ps(detail_avx2_dft8::orig_mult),
-                _mm256_mul_ps(_mm256_permute_ps(temp_d_1, 0xB1),
-                              _mm256_load_ps(detail_avx2_dft8::flip_mult)));
-
-            // Store result
-            _mm256_store_ps(reinterpret_cast<float *>(out),
-                            _mm256_add_ps(d_0, d_1));
-            _mm256_store_ps(reinterpret_cast<float *>(out + 4),
-                            _mm256_sub_ps(d_0, d_1));
-          }
-        }
-      }
-      MCA_END;
-      return;
-    }
-  };
+#include "dft_default.h"
+#include "dft_AVX2.h"
 
   template <unsigned int N, unsigned int S, bool forward>
   static void transpose(T *__restrict__ in, T *__restrict__ out) noexcept {
@@ -675,8 +326,9 @@ private:
     static void Init() {
       if constexpr (!base_case) {
         // Ensure the coeffs are calculated
-        volatile T *coefs = FFTPlan<T>::get_twiddle_factors_by_angle<A, B>();
-        DFTLayer<L, A, true>::Init();
+        volatile T *coefs =
+            FFTPlan<T, plan_simd>::template get_twiddle_factors_by_angle<A, B>();
+        DFTLayer<L, A, true, dft_simd>::Init();
 
         // As well as the next layer's coeffs
         FFTRecurseLayer<L, B>::Init();
@@ -685,12 +337,12 @@ private:
 
     static void fft_recurse(T *__restrict__ in, T *__restrict__ out) noexcept {
       // Do the A sized FFT on each bin
-      DFTLayer<L, A, true>::execute(in, out);
+      DFTLayer<L, A, true, dft_simd>::execute(in, out);
 
       if constexpr (!base_case) {
         // Cooley Tukey twiddle factors
         T *twiddle_factors = static_cast<T *>(__builtin_assume_aligned(
-            FFTPlan<T>::get_twiddle_factors_by_angle<A, B>(),
+            FFTPlan<T, plan_simd>::template get_twiddle_factors_by_angle<A, B>(),
             MY_CPU_LOAD_SIZE));
 
         /* This nested loop (1) transposes the data around the second radix B

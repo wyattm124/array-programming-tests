@@ -136,7 +136,7 @@ TEST_CASE("FFT Basic Small Input") {
 
 // Error is measured as the maximum magnitude of the difference
 //  between any pair of computed and expected values
-template<unsigned int N>
+template<unsigned int N, SIMD_TYPE simd = SIMD_TYPE::NONE>
 std::pair<float, float> fft_opt_tester() {
     // Test Inputs
     alignas(MY_MAX_ALIGNMENT) FFT::Complex time_domain[N] = {0};
@@ -149,10 +149,10 @@ std::pair<float, float> fft_opt_tester() {
     
     // Init
 
-    FFT::FFTPlan<FFT::StdComplexWrap<float>>::Init<N>();
+    FFT::FFTPlan<FFT::StdComplexWrap<float>, simd>::template Init<N>();
     
     // modify in place to frequency domain
-    FFT::FFTPlan<FFT::Complex>::fft<N>(time_domain, resp);
+    FFT::FFTPlan<FFT::Complex, simd>::template fft<N>(time_domain, resp);
 
     // Check Outputs
     float max_diff = 0;
@@ -163,7 +163,7 @@ std::pair<float, float> fft_opt_tester() {
     }
 
     // modify in place back to time domain
-    FFT::FFTPlan<FFT::Complex>::ifft<N>(resp, time_domain);
+    FFT::FFTPlan<FFT::Complex, simd>::template ifft<N>(resp, time_domain);
     
     // Check Outputs
     float max_inverse_diff = 0;

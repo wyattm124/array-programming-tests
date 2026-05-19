@@ -3,7 +3,19 @@
 #include <benchmark/benchmark.h>
 #include <fftw3.h>
 
+#include <algorithm>
 #include <vector>
+
+template <unsigned long M>
+void interleaved_to_split(const float (&interleaved)[M], float *real,
+                          float *imag) {
+    static_assert((M % 2) == 0, "Interleaved complex buffers must have even length.");
+    constexpr unsigned long N = M / 2;
+    for (unsigned long i = 0; i < N; i++) {
+        real[i] = interleaved[2 * i];
+        imag[i] = interleaved[2 * i + 1];
+    }
+}
 
 /// Base Class for Sizes
 template <unsigned int M>
@@ -11,19 +23,17 @@ class Case : public benchmark::Fixture {
 public:
     constexpr static unsigned int N = M;
 protected:
-    alignas(MY_MAX_ALIGNMENT) std::complex<float> time_domain[N];
-    alignas(MY_MAX_ALIGNMENT) std::complex<float> freq_domain[N];
-    
+    alignas(MY_MAX_ALIGNMENT) float time_domain[2 * N];
+    alignas(MY_MAX_ALIGNMENT) float freq_domain[2 * N];
+
     void SetUp(const benchmark::State& state) {
-        for (unsigned int i = 0; i < N; i++) {
-            time_domain[i] = {0, 0};
-            freq_domain[i] = {0, 0};
-        }
+        (void)state;
+        std::fill_n(time_domain, 2 * N, 0.0f);
+        std::fill_n(freq_domain, 2 * N, 0.0f);
         FFT::wave_gen_lcg(time_domain, freq_domain, N);
     }
 };
 
-// Base Cases
 using Case2 = Case<2>;
 using Case3 = Case<3>;
 using Case4 = Case<4>;
@@ -31,137 +41,85 @@ using Case5 = Case<5>;
 using Case6 = Case<6>;
 using Case7 = Case<7>;
 using Case8 = Case<8>;
-
-// Power of 2 cases
 using PowerOf2 = Case<8192>;
-
-// Medium Prime cases
 using MediumPrime = Case<53>;
-
-// Mersenne Prime cases
 using MersennePrime = Case<8191>;
 
+template <unsigned long M>
+void process_fftw(benchmark::State& state, float (&time_domain)[M]) {
+    static_assert((M % 2) == 0, "Interleaved complex buffers must have even length.");
+    constexpr unsigned long N = M / 2;
+    fftwf_iodim dims[1] = {{static_cast<int>(N), 1, 1}};
+    float *in_real = static_cast<float*>(fftwf_malloc(sizeof(float) * N));
+    float *in_imag = static_cast<float*>(fftwf_malloc(sizeof(float) * N));
+    float *out_real = static_cast<float*>(fftwf_malloc(sizeof(float) * N));
+    float *out_imag = static_cast<float*>(fftwf_malloc(sizeof(float) * N));
+    interleaved_to_split(time_domain, in_real, in_imag);
+    fftwf_plan p = fftwf_plan_guru_split_dft(
+        1, dims, 0, nullptr, in_real, in_imag, out_real, out_imag, FFTW_MEASURE);
 
-/// Base Classes for Processing Flows
-template <unsigned long N>
-void process_fftw(benchmark::State& state, std::complex<float> (&time_domain)[N]) {
-    // Configure input with waves
-    fftwf_complex *out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
-    fftwf_plan p;
-
-    // Set the plan
-    p = fftwf_plan_dft_1d(N,
-        reinterpret_cast<fftwf_complex*>(time_domain),
-        out, FFTW_FORWARD, FFTW_MEASURE);
-
-    // Benchmark
     for (auto _ : state) {
         fftwf_execute(p);
     }
 
-    // Cleanup
     fftwf_destroy_plan(p);
-    fftwf_free(out);
+    fftwf_free(in_real);
+    fftwf_free(in_imag);
+    fftwf_free(out_real);
+    fftwf_free(out_imag);
 }
 
-template <unsigned long N>
-void process_fftw_with_alloc(benchmark::State& state, std::complex<float> (&time_domain)[N]) {
-    // Configure input with waves
-    fftwf_complex *in, *out;
+template <unsigned long M>
+void process_fftw_with_alloc(benchmark::State& state, float (&time_domain)[M]) {
+    static_assert((M % 2) == 0, "Interleaved complex buffers must have even length.");
+    constexpr unsigned long N = M / 2;
+    fftwf_iodim dims[1] = {{static_cast<int>(N), 1, 1}};
     fftwf_plan p;
-    std::vector<fftwf_complex *> buffs;
+    std::vector<float *> buffs;
 
-    // Benchmark
     for (auto _ : state) {
-        // Allocate fftw specific memory
-        in = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
-        out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
-        
-        // Set the plan
-        p = fftwf_plan_dft_1d(N, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
-        
-        // Copy the input to the appropriate location
-        std::copy(
-            reinterpret_cast<const float*>(time_domain),
-            reinterpret_cast<const float*>(time_domain + N),
-            reinterpret_cast<float*>(in)
-        );
-        
-        // Execute the fft itself
+        float *in_real = static_cast<float*>(fftwf_malloc(sizeof(float) * N));
+        float *in_imag = static_cast<float*>(fftwf_malloc(sizeof(float) * N));
+        float *out_real = static_cast<float*>(fftwf_malloc(sizeof(float) * N));
+        float *out_imag = static_cast<float*>(fftwf_malloc(sizeof(float) * N));
+
+        p = fftwf_plan_guru_split_dft(
+            1, dims, 0, nullptr, in_real, in_imag, out_real, out_imag, FFTW_ESTIMATE);
+
+        interleaved_to_split(time_domain, in_real, in_imag);
         fftwf_execute(p);
 
-        // Free memory later
-        buffs.push_back(in);
-        buffs.push_back(out);
-
-        // Cleanup plan for reset
+        buffs.push_back(in_real);
+        buffs.push_back(in_imag);
+        buffs.push_back(out_real);
+        buffs.push_back(out_imag);
         fftwf_destroy_plan(p);
     }
 
-    for (auto buf : buffs) {
+    for (auto *buf : buffs) {
         fftwf_free(buf);
     }
 }
 
-#ifdef ARCH_ARM
-template <unsigned long N>
-void process_neon(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
-    // Need to Copy Data to Correct Type
-    std::array<float32x2_t, N> temp_time_domain;
-    std::array<float32x2_t, N> temp_freq_domain;
-    for (unsigned int i = 0; i < N; i++) {
-        temp_time_domain[i] = {time_domain[i].real(), time_domain[i].imag()};
-    }
-
-    // Make sure to do initialization
-    FFT::FFTPlan<float32x2_t>::Init<N>();
+template <unsigned long M>
+void process_fft(benchmark::State& state, float (&time_domain)[M]) {
+    static_assert((M % 2) == 0, "Interleaved complex buffers must have even length.");
+    constexpr unsigned long N = M / 2;
+    alignas(MY_MAX_ALIGNMENT) float temp_freq_domain[M] = {0};
+    FFT::FFTPlan<float>::Init<N>();
 
     for (auto _ : state) {
-        FFT::FFTPlan<float32x2_t>::fft<N>(temp_time_domain.data(), temp_freq_domain.data());
-    }
-}
-#endif
-
-template <unsigned long N>
-void process_stdcomplexwrap(benchmark::State& state, std::complex<float> (&time_domain)[N]) {
-    FFT::StdComplexWrap<float> temp_freq_domain[N];
-
-    // Make sure to do initialization
-    FFT::FFTPlan<FFT::StdComplexWrap<float>>::Init<N>();
-
-    for (auto _ : state) {
-        FFT::FFTPlan<FFT::StdComplexWrap<float>>::fft<N>(
-            static_cast<FFT::StdComplexWrap<float>*>(time_domain),
-            temp_freq_domain
-        );
+        FFT::FFTPlan<float>::fft<N>(time_domain, temp_freq_domain);
     }
 }
 
-template <unsigned long N>
-void process_customcomplex(benchmark::State& state, std::complex<float> (&time_domain)[N]) {
-    // Need to Copy Data to Correct Type
-    alignas(MY_MAX_ALIGNMENT) FFT::Complex temp_time_domain[N];
-    alignas(MY_MAX_ALIGNMENT) FFT::Complex temp_freq_domain[N];
-    for (unsigned int i = 0; i < N; i++) {
-        temp_time_domain[i] = {time_domain[i].real(), time_domain[i].imag()};
-    }
-
-    // Make sure to do initialization
-    FFT::FFTPlan<FFT::Complex>::Init<N>();
-
-    for (auto _ : state) {
-        FFT::FFTPlan<FFT::Complex>::fft<N>(temp_time_domain, temp_freq_domain);
-    }
-}
-
-template <unsigned long N>
-void process_comp_unit(benchmark::State& state, std::complex<float> (&time_domain)[N]) {
-    // Need to Copy Data to Correct Type
-    alignas(MY_MAX_ALIGNMENT) FFT::Complex temp_time_domain[N];
-    alignas(MY_MAX_ALIGNMENT) FFT::Complex temp_freq_domain[N];
-    for (unsigned int i = 0; i < N; i++) {
-        temp_time_domain[i] = {time_domain[i].real(), time_domain[i].imag()};
-    }
+template <unsigned long M>
+void process_comp_unit(benchmark::State& state, float (&time_domain)[M]) {
+    static_assert((M % 2) == 0, "Interleaved complex buffers must have even length.");
+    constexpr unsigned long N = M / 2;
+    alignas(MY_MAX_ALIGNMENT) float temp_time_domain[M];
+    alignas(MY_MAX_ALIGNMENT) float temp_freq_domain[M] = {0};
+    std::copy(time_domain, time_domain + M, temp_time_domain);
 
     for (auto _ : state) {
         if constexpr (N == 2) {
@@ -179,135 +137,58 @@ void process_comp_unit(benchmark::State& state, std::complex<float> (&time_domai
         } else if constexpr (N == 8) {
             FFT::fft_8(temp_time_domain, temp_freq_domain);
         }
-    } 
+    }
 }
 
-BENCHMARK_DEFINE_F(Case2, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
-}
+BENCHMARK_DEFINE_F(Case2, CompUnitRaw)(benchmark::State& state) { process_comp_unit(state, time_domain); }
+BENCHMARK_DEFINE_F(Case3, CompUnitRaw)(benchmark::State& state) { process_comp_unit(state, time_domain); }
+BENCHMARK_DEFINE_F(Case4, CompUnitRaw)(benchmark::State& state) { process_comp_unit(state, time_domain); }
+BENCHMARK_DEFINE_F(Case5, CompUnitRaw)(benchmark::State& state) { process_comp_unit(state, time_domain); }
+BENCHMARK_DEFINE_F(Case6, CompUnitRaw)(benchmark::State& state) { process_comp_unit(state, time_domain); }
+BENCHMARK_DEFINE_F(Case7, CompUnitRaw)(benchmark::State& state) { process_comp_unit(state, time_domain); }
+BENCHMARK_DEFINE_F(Case8, CompUnitRaw)(benchmark::State& state) { process_comp_unit(state, time_domain); }
 
-BENCHMARK_DEFINE_F(Case3, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
-}
+BENCHMARK_DEFINE_F(Case2, FFTW)(benchmark::State& state) { process_fftw(state, time_domain); }
+BENCHMARK_DEFINE_F(Case3, FFTW)(benchmark::State& state) { process_fftw(state, time_domain); }
+BENCHMARK_DEFINE_F(Case4, FFTW)(benchmark::State& state) { process_fftw(state, time_domain); }
+BENCHMARK_DEFINE_F(Case5, FFTW)(benchmark::State& state) { process_fftw(state, time_domain); }
+BENCHMARK_DEFINE_F(Case6, FFTW)(benchmark::State& state) { process_fftw(state, time_domain); }
+BENCHMARK_DEFINE_F(Case7, FFTW)(benchmark::State& state) { process_fftw(state, time_domain); }
+BENCHMARK_DEFINE_F(Case8, FFTW)(benchmark::State& state) { process_fftw(state, time_domain); }
 
-BENCHMARK_DEFINE_F(Case4, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
-}
+BENCHMARK_DEFINE_F(PowerOf2, RawFFT)(benchmark::State& state) { process_fft(state, time_domain); }
+BENCHMARK_DEFINE_F(PowerOf2, FFTW)(benchmark::State& state) { process_fftw(state, time_domain); }
+BENCHMARK_DEFINE_F(PowerOf2, FFTWWithAlloc)(benchmark::State& state) { process_fftw_with_alloc(state, time_domain); }
 
-BENCHMARK_DEFINE_F(Case5, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
-}
+BENCHMARK_DEFINE_F(MediumPrime, RawFFT)(benchmark::State& state) { process_fft(state, time_domain); }
+BENCHMARK_DEFINE_F(MediumPrime, FFTW)(benchmark::State& state) { process_fftw(state, time_domain); }
 
-BENCHMARK_DEFINE_F(Case6, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
-}
+BENCHMARK_DEFINE_F(MersennePrime, RawFFT)(benchmark::State& state) { process_fft(state, time_domain); }
+BENCHMARK_DEFINE_F(MersennePrime, FFTW)(benchmark::State& state) { process_fftw(state, time_domain); }
 
-BENCHMARK_DEFINE_F(Case7, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case8, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case2, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case3, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case4, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case5, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case6, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case7, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case8, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-#ifdef ARCH_ARM
-BENCHMARK_DEFINE_F(PowerOf2, Neon)(benchmark::State& state) {
-    process_neon(state, time_domain);
-}
-#endif
-
-BENCHMARK_DEFINE_F(PowerOf2, CustomComplex)(benchmark::State& state) {
-    process_customcomplex(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(PowerOf2, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(PowerOf2, FFTWWithAlloc)(benchmark::State& state) {
-    process_fftw_with_alloc(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(PowerOf2, StdComplexWrap)(benchmark::State& state) {
-    process_stdcomplexwrap(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(MediumPrime, CustomComplex)(benchmark::State& state) {
-    process_customcomplex(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(MediumPrime, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(MersennePrime, CustomComplex)(benchmark::State& state) {
-    process_customcomplex(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(MersennePrime, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-// Base Case Benchmarks
-BENCHMARK_REGISTER_F(Case2, CompUnitComplex);
+BENCHMARK_REGISTER_F(Case2, CompUnitRaw);
 BENCHMARK_REGISTER_F(Case2, FFTW);
-BENCHMARK_REGISTER_F(Case3, CompUnitComplex);
+BENCHMARK_REGISTER_F(Case3, CompUnitRaw);
 BENCHMARK_REGISTER_F(Case3, FFTW);
-BENCHMARK_REGISTER_F(Case4, CompUnitComplex);
+BENCHMARK_REGISTER_F(Case4, CompUnitRaw);
 BENCHMARK_REGISTER_F(Case4, FFTW);
-BENCHMARK_REGISTER_F(Case5, CompUnitComplex);
+BENCHMARK_REGISTER_F(Case5, CompUnitRaw);
 BENCHMARK_REGISTER_F(Case5, FFTW);
-BENCHMARK_REGISTER_F(Case6, CompUnitComplex);
+BENCHMARK_REGISTER_F(Case6, CompUnitRaw);
 BENCHMARK_REGISTER_F(Case6, FFTW);
-BENCHMARK_REGISTER_F(Case7, CompUnitComplex);
+BENCHMARK_REGISTER_F(Case7, CompUnitRaw);
 BENCHMARK_REGISTER_F(Case7, FFTW);
-BENCHMARK_REGISTER_F(Case8, CompUnitComplex);
+BENCHMARK_REGISTER_F(Case8, CompUnitRaw);
 BENCHMARK_REGISTER_F(Case8, FFTW);
 
-// Power of 2 Benchmarks
-#ifdef ARCH_ARM
-BENCHMARK_REGISTER_F(PowerOf2, Neon);
-#endif
-BENCHMARK_REGISTER_F(PowerOf2, CustomComplex);
+BENCHMARK_REGISTER_F(PowerOf2, RawFFT);
 BENCHMARK_REGISTER_F(PowerOf2, FFTW);
 BENCHMARK_REGISTER_F(PowerOf2, FFTWWithAlloc);
-BENCHMARK_REGISTER_F(PowerOf2, StdComplexWrap);
 
-// Medium Prime Benchmarks
-BENCHMARK_REGISTER_F(MediumPrime, CustomComplex);
+BENCHMARK_REGISTER_F(MediumPrime, RawFFT);
 BENCHMARK_REGISTER_F(MediumPrime, FFTW);
 
-// Mersenne Prime Benchmarks
-BENCHMARK_REGISTER_F(MersennePrime, CustomComplex);
+BENCHMARK_REGISTER_F(MersennePrime, RawFFT);
 BENCHMARK_REGISTER_F(MersennePrime, FFTW);
 
-// Template out main
 BENCHMARK_MAIN();

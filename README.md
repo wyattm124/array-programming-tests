@@ -166,8 +166,7 @@ precision.
 
 ## Project Structure
 
-- `src/` - Source code headers (FFT, complex types, prime
-  factorization)
+- `src/` - Source code headers (FFT and prime factorization)
 - `test/` - Test files
 - `bench/` - Benchmarking and profiling code
 - `tools/` - Utility tools
@@ -181,4 +180,3 @@ To build all components:
 build_fft
 build_tools
 ```
-

@@ -1,0 +1,125 @@
+ninja_required_version = 1.10
+
+builddir = build
+cxx = clang++
+cxxstd = -std=c++23
+fft_compile_flags = -O3 $$FFT_ARCH_FLAGS $$CXXFLAGS
+fft_profile_compile_flags = -O3 -g $$FFT_ARCH_FLAGS $$CXXFLAGS
+tool_compile_flags = -O2 $$FFT_ARCH_FLAGS $$CXXFLAGS
+fftw_libs = -lfftw3f
+benchmark_libs = -lbenchmark -pthread -lfftw3f -lyaml-cpp
+
+rule generate_fft_tests
+  command = python3 tools/generate_fft_doctest.py --spec-dir test/specs --out-dir test/generated
+  description = GEN test/generated/*.inc
+  generator = 1
+  restat = 1
+
+rule generate_fft_benchmarks
+  command = python3 tools/generate_fft_benchmarks.py --spec bench/specs/fft_bench.yaml --out-dir bench/generated
+  description = GEN bench/generated/*.inc
+  generator = 1
+  restat = 1
+
+rule cxx
+  command = mkdir -p build/obj/test build/obj/bench build/obj/tools && $cxx $cxxstd $flags -MMD -MF $out.d -c $in -o $out
+  depfile = $out.d
+  deps = gcc
+  description = CXX $out
+
+rule link
+  command = mkdir -p bin && $cxx $flags $in -o $out $libs
+  description = LINK $out
+
+rule run_suite
+  command = mkdir -p build && rm -f $out && $cmd && touch $out
+  description = TEST $out
+  pool = console
+
+rule mca_timeline
+  command = mkdir -p build && $cxx $cxxstd -O3 $$FFT_ARCH_FLAGS $$CXXFLAGS bench/fft_profile.cpp -S -o - | llvm-mca -skip-unsupported-instructions=lack-sched --timeline > $out
+  description = MCA $out
+  pool = console
+
+# Linux-only perf helpers.
+rule perf_layer_analysis
+  command = bash -lc 'if [ "$$(uname -s)" != "Linux" ]; then echo "perf_layer_analysis is only available on Linux platforms." >&2; exit 1; fi; mkdir -p build && perf record -g --call-graph dwarf -e branch-misses,cache-misses,cycles ./bin/fft_profile >/dev/null 2>&1 && perf report --stdio --symbol-filter=FFT::.* > $out'
+  description = PERF $out
+  pool = console
+
+rule perf_annotate_layer
+  command = bash -lc 'if [ "$$(uname -s)" != "Linux" ]; then echo "perf_annotate_layer is only available on Linux platforms." >&2; exit 1; fi; mkdir -p build && perf record -g --call-graph dwarf ./bin/fft_profile >/dev/null 2>&1 && perf annotate --stdio > $out'
+  description = PERF $out
+  pool = console
+
+build test/generated/fft_none.inc test/generated/fft_avx2.inc test/generated/fft_neon.inc: generate_fft_tests tools/generate_fft_doctest.py test/specs/fft.yaml
+build bench/generated/fft_bench_none.inc bench/generated/fft_bench_avx2.inc bench/generated/fft_bench_neon.inc: generate_fft_benchmarks tools/generate_fft_benchmarks.py bench/specs/fft_bench.yaml
+
+build build/obj/test/fft_tests.o: cxx test/fft_tests.cpp | test/generated/fft_none.inc test/generated/fft_avx2.inc test/generated/fft_neon.inc
+  flags = $fft_compile_flags
+
+build build/obj/bench/fft_bench.o: cxx bench/fft_bench.cpp | bench/generated/fft_bench_none.inc bench/generated/fft_bench_avx2.inc bench/generated/fft_bench_neon.inc
+  flags = $fft_compile_flags
+
+build build/obj/bench/fft_comp_unit.o: cxx bench/fft_comp_unit.cpp
+  flags = $fft_compile_flags
+
+build build/obj/bench/fft_profile.o: cxx bench/fft_profile.cpp
+  flags = $fft_profile_compile_flags
+
+build build/obj/test/cheb_tests.o: cxx test/cheb_tests.cpp
+  flags = $tool_compile_flags
+
+build build/obj/tools/smooth_dist.o: cxx tools/smooth_dist.cpp
+  flags = $tool_compile_flags
+
+build build/obj/tools/roots_printer.o: cxx tools/roots_printer.cpp
+  flags = $tool_compile_flags
+
+build bin/fft_tests: link build/obj/test/fft_tests.o
+  flags = $fft_compile_flags
+  libs = $fftw_libs
+
+build bin/fft_bench: link build/obj/bench/fft_bench.o build/obj/bench/fft_comp_unit.o
+  flags = $fft_compile_flags
+  libs = $benchmark_libs
+
+build bin/fft_profile: link build/obj/bench/fft_profile.o build/obj/bench/fft_comp_unit.o
+  flags = $fft_profile_compile_flags
+  libs =
+
+build bin/cheb_tests: link build/obj/test/cheb_tests.o
+  flags = $tool_compile_flags
+  libs =
+
+build bin/smooth_dist: link build/obj/tools/smooth_dist.o
+  flags = $tool_compile_flags
+  libs =
+
+build bin/roots_printer: link build/obj/tools/roots_printer.o
+  flags = $tool_compile_flags
+  libs =
+
+build build/run_fft_tests.stamp: run_suite bin/fft_tests bin/fft_bench bin/fft_profile
+  cmd = ./bin/fft_tests
+
+build build/run_tool_tests.stamp: run_suite bin/cheb_tests bin/smooth_dist bin/roots_printer
+  cmd = ./bin/cheb_tests
+
+build build/mca_timeline.txt: mca_timeline bench/fft_profile.cpp src/fft.hpp src/dft_default.h src/dft_AVX2.h src/prime_factor.hpp
+build build/perf_layer_analysis.txt: perf_layer_analysis bin/fft_profile
+build build/perf_annotate_layer.txt: perf_annotate_layer bin/fft_profile
+
+build generate_fft_tests: phony test/generated/fft_none.inc test/generated/fft_avx2.inc test/generated/fft_neon.inc
+build generate_fft_benchmarks: phony bench/generated/fft_bench_none.inc bench/generated/fft_bench_avx2.inc bench/generated/fft_bench_neon.inc
+build build_fft: phony bin/fft_bench bin/fft_profile bin/fft_tests build/run_fft_tests.stamp
+build build_tools: phony bin/cheb_tests bin/smooth_dist bin/roots_printer build/run_tool_tests.stamp
+build tests: phony build/run_fft_tests.stamp build/run_tool_tests.stamp
+build mca_timeline: phony build/mca_timeline.txt
+build perf_layer_analysis: phony build/perf_layer_analysis.txt
+build perf_annotate_layer: phony build/perf_annotate_layer.txt
+build all: phony build_fft build_tools
+
+build default: phony all
+
+default all

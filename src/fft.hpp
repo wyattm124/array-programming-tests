@@ -5,10 +5,12 @@
 #include <cstdlib>
 #include <type_traits>
 
+#include "arch_config.hpp"
 #include "prime_factor.hpp"
 
-// TODO: Conditional include on ARCH_x86_64
+#if FFT_HAS_AVX2
 #include <immintrin.h>
+#endif
 
 /// TODO:
 /// (1) - May want base cases for 9 and 10
@@ -321,7 +323,9 @@ private:
   struct DFTLayer;
 
 #include "dft_default.h"
+#if FFT_HAS_AVX2
 #include "dft_AVX2.h"
+#endif
 
   template <unsigned int N, unsigned int S, bool forward>
   static void transpose(T *__restrict__ in, T *__restrict__ out) noexcept {

@@ -1,9 +1,9 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
+#include "../src/arch_config.hpp"
 #include "../src/fft.hpp"
 #include <algorithm>
-#include <array>
 #include <fftw3.h>
 #include <utility>
 
@@ -26,17 +26,6 @@ bool factors_check(unsigned int num, unsigned int *expected_factors,
 template <typename T>
 T pair_abs(T real, T imag) {
     return static_cast<T>(std::sqrt(real * real + imag * imag));
-}
-
-template <typename T, std::size_t N>
-T max_pair_diff(const std::array<T, N> &lhs, const std::array<T, N> &rhs) {
-    T max_diff = 0;
-    for (std::size_t i = 0; i < N / 2; i++) {
-        max_diff = std::max(
-            max_diff,
-            pair_abs(lhs[2 * i] - rhs[2 * i], lhs[2 * i + 1] - rhs[2 * i + 1]));
-    }
-    return max_diff;
 }
 
 template <unsigned int N>
@@ -183,79 +172,15 @@ std::pair<float, float> fftw_tester() {
     return {max_diff, max_inverse_diff};
 }
 
-TEST_CASE("FFT Basic Small Input") {
-    auto Ans_8 = fft_opt_tester<8>();
-    CHECK(Ans_8.first < 2e-5f);
-    CHECK(Ans_8.second < 8e-6f);
+#include "generated/fft_none.inc"
+#if FFT_HAS_AVX2
+#include "generated/fft_avx2.inc"
+#endif
+#if FFT_HAS_NEON
+#include "generated/fft_neon.inc"
+#endif
 
-    auto Ans_9 = fft_opt_tester<9>();
-    CHECK(Ans_9.first < 6e-6f);
-    CHECK(Ans_9.second < 5e-6f);
-}
-
-TEST_CASE("FFT Opt Base Case Input") {
-    auto Ans_3 = fft_opt_tester<3>();
-    CHECK(Ans_3.first < 2e-7);
-    CHECK(Ans_3.second < 2e-7);
-
-    auto Ans_4 = fft_opt_tester<4>();
-    CHECK(Ans_4.first < 5e-7);
-    CHECK(Ans_4.second < 2e-7);
-
-    auto Ans_5 = fft_opt_tester<5>();
-    CHECK(Ans_5.first < 6e-7);
-    CHECK(Ans_5.second < 3.5e-7);
-
-    auto Ans_6 = fft_opt_tester<6>();
-    CHECK(Ans_6.first < 1.3e-6);
-    CHECK(Ans_6.second < 3e-7);
-
-    auto Ans_7 = fft_opt_tester<7>();
-    CHECK(Ans_7.first < 9.3e-7);
-    CHECK(Ans_7.second < 4e-7);
-
-    auto Ans_8 = fft_opt_tester<8>();
-    CHECK(Ans_8.first < 1.1e-6);
-    CHECK(Ans_8.second < 5e-7);
-}
-
-TEST_CASE("FFT Opt Med Prime Input") {
-    auto Ans_13 = fft_opt_tester<13>();
-    CHECK(Ans_13.first < 1e-9);
-    CHECK(Ans_13.second < 1e-9);
-
-    auto Ans_53 = fft_opt_tester<53>();
-    CHECK(Ans_53.first < 2.3e-4);
-    CHECK(Ans_53.second < 7e-5);
-}
-
-TEST_CASE("FFT Opt Small Prime Composite Input") {
-    auto Ans_1 = fft_opt_tester<3 * 5>();
-    CHECK(Ans_1.first < 2e-5);
-    CHECK(Ans_1.second < 2e-2);
-
-    auto Ans_2 = fft_opt_tester<7 * 5>();
-    CHECK(Ans_2.first < 9e-5);
-    CHECK(Ans_2.second < 3.5e-5);
-
-    auto Ans_3 = fft_opt_tester<3 * 5 * 5>();
-    CHECK(Ans_3.first < 4e-4);
-    CHECK(Ans_3.second < 3e-1);
-
-    auto Ans_4 = fft_opt_tester<3 * 5 * 7>();
-    CHECK(Ans_4.first < 7e-4);
-    CHECK(Ans_4.second < 3e-1);
-
-    auto Ans_5 = fft_opt_tester<7 * 11>();
-    CHECK(Ans_5.first < 4e-4);
-    CHECK(Ans_5.second < 6e-5);
-
-    auto Ans_6 = fft_opt_tester<3 * 5 * 7 * 11 * 13>();
-    CHECK(Ans_6.first < 2e-3);
-    CHECK(Ans_6.second < 2e-2);
-}
-
-#ifdef ARCH_ARM
+#if FFT_HAS_NEON
 TEST_CASE("FFTW Compatability") {
     auto Ans_7 = fftw_tester<3 * 5 * 7>();
     CHECK(Ans_7.first < 7e-2);

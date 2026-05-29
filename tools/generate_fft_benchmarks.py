@@ -18,7 +18,7 @@ OUTPUT_NAMES = {
 
 def benchmark_name(size: int, kind: str, simd: str | None = None) -> str:
     suffix = ""
-    if simd is not None and simd != "NONE":
+    if simd is not None and (simd != "NONE" or kind == "RawFFT"):
         suffix = f" [{simd}]"
     return f"N{size}/{kind}{suffix}"
 

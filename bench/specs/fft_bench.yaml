@@ -38,17 +38,23 @@ benchmarks:
     raw_fft:
       NONE:
         baseline_cpu_time_ns: 2308.0
+      AVX2: {}
+      NEON: {}
     fftw:
       baseline_cpu_time_ns: 443.0
   - size: 8192
     raw_fft:
       NONE:
         baseline_cpu_time_ns: 103953.0
+      AVX2: {}
+      NEON: {}
     fftw:
       baseline_cpu_time_ns: 14500.0
   - size: 8191
     raw_fft:
       NONE:
         baseline_cpu_time_ns: 1739300627.0
+      AVX2: {}
+      NEON: {}
     fftw:
       baseline_cpu_time_ns: 67086.0

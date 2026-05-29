@@ -4,9 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    git-hooks.url = "github:cachix/git-hooks.nix";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, git-hooks }:
     flake-utils.lib.eachDefaultSystem (system: let
       pkgs = import nixpkgs { inherit system; };
       # Use llvmPackages.stdenv for non-macOS platforms, default otherwise
@@ -48,6 +49,15 @@
         ];
       };
       pythonWithYaml = pkgs.python3.withPackages (ps: [ ps.pyyaml ]);
+      pre-commit-check = git-hooks.lib.${system}.run {
+        src = ./.;
+        hooks = {
+          clang-format = {
+            enable = true;
+            files = "\\.(cpp|cc|cxx|c|hpp|hh|hxx|h)$";
+          };
+        };
+      };
     in rec {
       devShells.default = pkgs.mkShell {
         stdenv = stdenv;
@@ -58,12 +68,14 @@
           pkgs.fftwFloat
           pkgs.yaml-cpp
           pythonWithYaml
-        ] ++ pkgs.lib.optionals (!isMac) [
+        ] ++ pre-commit-check.enabledPackages
+          ++ pkgs.lib.optionals (!isMac) [
           pkgs.linuxPackages.perf
           pkgs.llvmPackages.llvm
         ];
 
         shellHook = ''
+          ${pre-commit-check.shellHook}
           unset NIX_ENFORCE_NO_NATIVE
           export CC=clang
           export CXX=clang++

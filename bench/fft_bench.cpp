@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -26,6 +27,7 @@ struct BenchmarkBaseline {
 };
 
 using BaselineMap = std::unordered_map<std::string, BenchmarkBaseline>;
+using MeasuredBenchmarkMap = std::unordered_map<std::string, double>;
 
 struct BenchmarkGroup {
   std::string size_label;
@@ -159,10 +161,93 @@ BaselineMap load_baselines(const std::string &path) {
   return baselines;
 }
 
+bool should_update_baselines() {
+  const char *value = std::getenv("FFT_BENCH_UPDATE_BASELINES");
+  if (value == nullptr) {
+    return false;
+  }
+
+  const std::string normalized(value);
+  return !normalized.empty() && normalized != "0" && normalized != "false" &&
+         normalized != "FALSE" && normalized != "no" && normalized != "NO";
+}
+
+void set_baseline_value(YAML::Node node, double cpu_time_ns) {
+  if (!node || !node.IsMap()) {
+    node = YAML::Node(YAML::NodeType::Map);
+  }
+  node["baseline_cpu_time_ns"] = cpu_time_ns;
+}
+
+void update_baseline_spec(const std::string &path,
+                          const MeasuredBenchmarkMap &measured_benchmarks) {
+  std::ifstream stream(path);
+  if (!stream.good()) {
+    throw std::runtime_error("benchmark spec file not found: " + path);
+  }
+
+  YAML::Node root = YAML::Load(stream);
+  YAML::Node benchmarks = root["benchmarks"];
+  if (!benchmarks || !benchmarks.IsSequence()) {
+    throw std::runtime_error("'benchmarks' must be a YAML sequence.");
+  }
+
+  for (auto case_node : benchmarks) {
+    const unsigned long size = case_node["size"].as<unsigned long>();
+
+    const auto comp_unit_it =
+        measured_benchmarks.find(benchmark_name(size, "CompUnitRaw"));
+    if (comp_unit_it != measured_benchmarks.end() &&
+        case_node["comp_unit_raw"]) {
+      set_baseline_value(case_node["comp_unit_raw"], comp_unit_it->second);
+    }
+
+    if (case_node["raw_fft"] && case_node["raw_fft"].IsMap()) {
+      for (const auto &entry : case_node["raw_fft"]) {
+        const std::string simd = entry.first.as<std::string>();
+        const auto raw_fft_it =
+            measured_benchmarks.find(benchmark_name(size, "RawFFT", simd));
+        if (raw_fft_it != measured_benchmarks.end()) {
+          set_baseline_value(case_node["raw_fft"][simd], raw_fft_it->second);
+        }
+      }
+    }
+
+    const auto fftw_it = measured_benchmarks.find(benchmark_name(size, "FFTW"));
+    if (fftw_it != measured_benchmarks.end() && case_node["fftw"]) {
+      set_baseline_value(case_node["fftw"], fftw_it->second);
+    }
+  }
+
+  YAML::Emitter emitter;
+  emitter << root;
+  if (!emitter.good()) {
+    throw std::runtime_error("failed to serialize benchmark spec YAML.");
+  }
+
+  std::ofstream out(path, std::ios::trunc);
+  if (!out.good()) {
+    throw std::runtime_error("failed to open benchmark spec for writing: " +
+                             path);
+  }
+  out << emitter.c_str() << '\n';
+}
+
 class BaselineDeltaReporter : public benchmark::ConsoleReporter {
 public:
   explicit BaselineDeltaReporter(BaselineMap baselines)
       : benchmark::ConsoleReporter(), baselines_(std::move(baselines)) {}
+
+  MeasuredBenchmarkMap measured_cpu_times() const {
+    MeasuredBenchmarkMap measured;
+    for (const auto &run : buffered_runs_) {
+      if (run.run_type != Run::RT_Iteration) {
+        continue;
+      }
+      measured[run.benchmark_name()] = adjusted_cpu_time_ns(run);
+    }
+    return measured;
+  }
 
 protected:
   bool ReportContext(const Context &context) override {
@@ -591,6 +676,19 @@ int main(int argc, char **argv) {
 
   BaselineDeltaReporter reporter(std::move(baselines));
   benchmark::RunSpecifiedBenchmarks(&reporter);
+
+  if (should_update_baselines()) {
+    try {
+      update_baseline_spec(spec_path, reporter.measured_cpu_times());
+      std::cout << "updated benchmark baselines in " << spec_path << "\n";
+    } catch (const std::exception &ex) {
+      std::cerr << "error: failed to update benchmark baselines in "
+                << spec_path << ": " << ex.what() << "\n";
+      benchmark::Shutdown();
+      return 1;
+    }
+  }
+
   benchmark::Shutdown();
   return 0;
 }

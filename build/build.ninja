@@ -103,6 +103,9 @@ build bin/roots_printer: link build/obj/tools/roots_printer.o
 build build/run_fft_tests.stamp: run_suite bin/fft_tests bin/fft_bench bin/fft_profile
   cmd = ./bin/fft_tests
 
+build build/run_fft_bench.stamp: run_suite bin/fft_bench
+  cmd = ./bin/fft_bench
+
 build build/run_tool_tests.stamp: run_suite bin/cheb_tests bin/smooth_dist bin/roots_printer
   cmd = ./bin/cheb_tests
 
@@ -113,6 +116,7 @@ build build/perf_annotate_layer.txt: perf_annotate_layer bin/fft_profile
 build generate_fft_tests: phony test/generated/fft_none.inc test/generated/fft_avx2.inc test/generated/fft_neon.inc
 build generate_fft_benchmarks: phony bench/generated/fft_bench_none.inc bench/generated/fft_bench_avx2.inc bench/generated/fft_bench_neon.inc
 build build_fft: phony bin/fft_bench bin/fft_profile bin/fft_tests build/run_fft_tests.stamp
+build run_fft_bench: phony build/run_fft_bench.stamp
 build build_tools: phony bin/cheb_tests bin/smooth_dist bin/roots_printer build/run_tool_tests.stamp
 build tests: phony build/run_fft_tests.stamp build/run_tool_tests.stamp
 build mca_timeline: phony build/mca_timeline.txt

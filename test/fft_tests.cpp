@@ -142,7 +142,7 @@ template <unsigned int N> std::pair<float, float> fftw_tester() {
 
   interleaved_to_split(in, in_real, in_imag);
   p = fftwf_plan_guru_split_dft(1, dims, 0, nullptr, in_real, in_imag, out_real,
-                                out_imag, FFTW_MEASURE);
+                                out_imag, FFTW_ESTIMATE);
   fftwf_execute(p);
   split_to_interleaved(out_real, out_imag, out);
   fftwf_destroy_plan(p);
@@ -160,7 +160,7 @@ template <unsigned int N> std::pair<float, float> fftw_tester() {
   for (unsigned int i = 0; i < N; i++)
     out_imag[i] = -out_imag[i];
   p = fftwf_plan_guru_split_dft(1, dims, 0, nullptr, out_real, out_imag,
-                                in_real, in_imag, FFTW_MEASURE);
+                                in_real, in_imag, FFTW_ESTIMATE);
   fftwf_execute(p);
   for (unsigned int i = 0; i < N; i++)
     in_imag[i] = -in_imag[i];

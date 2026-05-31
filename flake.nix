@@ -62,6 +62,7 @@
       devShells.default = pkgs.mkShell {
         stdenv = stdenv;
         buildInputs = [
+          pkgs.ninja
           stdenv.cc
           doctest
           googlebench

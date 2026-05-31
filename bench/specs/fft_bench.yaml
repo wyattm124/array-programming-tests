@@ -1,60 +1,60 @@
 benchmarks:
   - size: 2
     comp_unit_raw:
-      baseline_cpu_time_ns: 1.0697321860782856
+      baseline_cpu_time_ns: 0.92969753792099541
     fftw:
-      baseline_cpu_time_ns: 6.7418930229621177
+      baseline_cpu_time_ns: 3.3593804119221198
   - size: 3
     comp_unit_raw:
-      baseline_cpu_time_ns: 2.5718474425940716
+      baseline_cpu_time_ns: 1.8722347685037686
     fftw:
-      baseline_cpu_time_ns: 7.0801920022802172
+      baseline_cpu_time_ns: 4.5552925366782784
   - size: 4
     comp_unit_raw:
-      baseline_cpu_time_ns: 1.7957360564305407
+      baseline_cpu_time_ns: 1.4701549004346792
     fftw:
-      baseline_cpu_time_ns: 7.9032941307349551
+      baseline_cpu_time_ns: 4.8567757553568454
   - size: 5
     comp_unit_raw:
-      baseline_cpu_time_ns: 7.7476091847510578
+      baseline_cpu_time_ns: 5.9705782347058545
     fftw:
-      baseline_cpu_time_ns: 12.701952052004771
+      baseline_cpu_time_ns: 6.6172668230345586
   - size: 6
     comp_unit_raw:
-      baseline_cpu_time_ns: 6.5468980833352903
+      baseline_cpu_time_ns: 7.1306772010934125
     fftw:
-      baseline_cpu_time_ns: 13.295204782562378
+      baseline_cpu_time_ns: 7.8998887191029077
   - size: 7
     comp_unit_raw:
-      baseline_cpu_time_ns: 15.073958425740289
+      baseline_cpu_time_ns: 10.049437548174195
     fftw:
-      baseline_cpu_time_ns: 19.590391703625635
+      baseline_cpu_time_ns: 10.567804203262819
   - size: 8
     comp_unit_raw:
-      baseline_cpu_time_ns: 6.3532875877828836
+      baseline_cpu_time_ns: 6.1732854933907184
     fftw:
-      baseline_cpu_time_ns: 11.922450968921831
+      baseline_cpu_time_ns: 8.5248112886780785
   - size: 53
     raw_fft:
       NONE:
-        baseline_cpu_time_ns: 2187.7898419477833
+        baseline_cpu_time_ns: 1529.2231268472674
       AVX2: {baseline_cpu_time_ns: 2031.3961890881949}
-      NEON: {}
+      NEON: {baseline_cpu_time_ns: 1516.3158567802739}
     fftw:
-      baseline_cpu_time_ns: 384.13612153740326
+      baseline_cpu_time_ns: 292.93687392739713
   - size: 8192
     raw_fft:
       NONE:
-        baseline_cpu_time_ns: 72067.28137498656
+        baseline_cpu_time_ns: 39936.153232242483
       AVX2: {baseline_cpu_time_ns: 63587.865968494036}
-      NEON: {}
+      NEON: {baseline_cpu_time_ns: 39964.999429028299}
     fftw:
-      baseline_cpu_time_ns: 13519.887909918509
+      baseline_cpu_time_ns: 31467.514378145133
   - size: 8191
     raw_fft:
       NONE:
-        baseline_cpu_time_ns: 1726028099.0000005
+        baseline_cpu_time_ns: 538914000.00000191
       AVX2: {baseline_cpu_time_ns: 1693507852.9999998}
-      NEON: {}
+      NEON: {baseline_cpu_time_ns: 579443999.99999869}
     fftw:
-      baseline_cpu_time_ns: 75782.512151310279
+      baseline_cpu_time_ns: 153739.73204480571

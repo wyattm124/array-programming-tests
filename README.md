@@ -76,49 +76,99 @@ support.
 
 ## Getting Started
 
-Once Nix is installed, first build the development shell:
-
-```bash
-nix build
-```
-
-Then enter the shell with
+Once Nix is installed, enter the development shell from the repository root:
 
 ```bash
 nix develop
 ```
 
-This will provide you with all the necessary dependencies including:
+The dev shell provides the compiler, Ninja, FFTW, Google Benchmark,
+YAML tooling for generated sources, and a `pre-commit` hook that runs
+`clang-format` on C and C++ files. It also exports architecture-specific
+compile flags through `FFT_ARCH_FLAGS` so x86 builds use `AVX2`/`FMA`
+and ARM builds use `NEON` when available.
+
+From inside the shell, the normal workflow is Ninja-based:
+
+```bash
+ninja -f build/build.ninja build_fft
+```
+
+This builds the FFT executables and runs the FFT test suite as part of
+the `build_fft` target.
+
+The shell includes the main dependencies used by this repository:
 - doctest (testing framework)
 - Google Benchmark
 - FFTW (Fast Fourier Transform library)
-- gperftools (performance profiling tools)
-- Graphviz and gv (graph visualization tools)
+- yaml-cpp
+- Python with PyYAML
+- Ninja
+- LLVM tools and Linux `perf` on supported Linux hosts
 
-The shell should not have to be rebuilt unless the nix flake is modified,
-but the shell will have to be active to run any of the command aliases or
-run any of the binaries.
+The shell does not define build aliases. Use the `build/build.ninja`
+targets documented below.
 
-## Shell Aliases
+## Build Commands
 
-The development shell provides several convenient functions for
-building and working with the project. Make sure to run these commands
-from the root of the repository:
+Run all commands below from the repository root.
 
-### `build_fft`
+### Build FFT targets
 
-Builds all FFT-related executables:
+Build the FFT executables and run the FFT tests:
 
-- `bin/fft_tests` - FFT test suite
-- `bin/fft_bench` - FFT benchmarking tool
-- `bin/fft_profile` - FFT profiling tool
-
-**Usage:**
 ```bash
-build_fft
+ninja -f build/build.ninja build_fft
 ```
 
-**Note:** These are compiled with `-O3` optimization level.
+This target builds:
+- `bin/fft_tests`
+- `bin/fft_bench`
+- `bin/fft_profile`
+
+### Run only the benchmark executable
+
+```bash
+ninja -f build/build.ninja run_fft_bench
+```
+
+To update benchmark baselines in `bench/specs/fft_bench.yaml` with the
+measured CPU times from the current run:
+
+```bash
+FFT_BENCH_UPDATE_BASELINES=1 ninja -f build/build.ninja run_fft_bench
+```
+
+### Build utility targets
+
+Build the non-FFT utilities and run `cheb_tests`:
+
+```bash
+ninja -f build/build.ninja build_tools
+```
+
+This target builds:
+- `bin/cheb_tests`
+- `bin/smooth_dist`
+- `bin/roots_printer`
+
+### Run all test suites
+
+```bash
+ninja -f build/build.ninja tests
+```
+
+This runs the FFT test suite and the utility test suite.
+
+### Regenerate generated test and benchmark sources
+
+The test and benchmark registration `.inc` files are generated from YAML
+specs. To regenerate them explicitly:
+
+```bash
+ninja -f build/build.ninja generate_fft_tests
+ninja -f build/build.ninja generate_fft_benchmarks
+```
 
 ### `mca_timeline`
 
@@ -126,9 +176,8 @@ Runs LLVM Machine Code Analyzer (llvm-mca) with timeline analysis on
 the FFT profiling code. This generates a detailed timeline view of
 instruction scheduling and execution.
 
-**Usage:**
 ```bash
-mca_timeline
+ninja -f build/build.ninja mca_timeline
 ```
 
 This compiles `bench/fft_profile.cpp` to assembly and analyzes it
@@ -143,40 +192,78 @@ code selection. Templated code sections may not work with these macros
 as they cannot be nested, and are best if only defined once. These
 macros are defined at the top of the `src/fft.hpp` file.
 
-### `build_tools`
+### `perf_layer_analysis`
 
-Builds utility tools:
+On supported Linux hosts, collect a `perf report` focused on FFT layer
+symbols:
 
-- `bin/cheb_tests` - Chebyshev approximation tests
-- `bin/smooth_dist` - Smooth distribution tool
-- `bin/roots_printer` - Roots printing utility
-
-**Usage:**
 ```bash
-build_tools
+ninja -f build/build.ninja perf_layer_analysis
 ```
 
-**Note:** These are compiled with `-O2` optimization level.
+### `perf_annotate_layer`
 
-These are assorted tools for exploring things such as the Chebyshev
-polynomial approximation of functions, the number theoretic smoothness
-of particular numbers as well as their distribution within specific
-intervals as well as printing specific roots of unity with specified
-precision.
+On supported Linux hosts, collect annotated `perf` output:
+
+```bash
+ninja -f build/build.ninja perf_annotate_layer
+```
+
+### Build everything
+
+```bash
+ninja -f build/build.ninja all
+```
 
 ## Project Structure
 
-- `src/` - Source code headers (FFT and prime factorization)
-- `test/` - Test files
-- `bench/` - Benchmarking and profiling code
-- `tools/` - Utility tools
-- `bin/` - Compiled executables (created after building)
+- `src/` - FFT implementation headers, architecture detection, prime
+  factorization helpers, and DFT layer specializations
+- `src/fft.hpp` - main FFT plan and recursive decomposition logic
+- `src/dft_default.h` - default DFT layer implementations used when no
+  SIMD specialization exists
+- `src/dft_AVX2.h` - AVX2-specific DFT layer specializations
+- `test/` - doctest-based test sources
+- `test/specs/` - YAML specifications used to generate FFT test cases
+- `test/generated/` - generated `.inc` files included by `test/fft_tests.cpp`
+- `bench/` - benchmark and profiling sources
+- `bench/specs/fft_bench.yaml` - YAML benchmark specification and stored
+  baseline CPU times
+- `bench/generated/` - generated benchmark registration `.inc` files
+- `tools/` - helper programs and code generators
+- `tools/generate_fft_doctest.py` - generates FFT doctest includes from
+  `test/specs/*.yaml`
+- `tools/generate_fft_benchmarks.py` - generates benchmark registration
+  includes from `bench/specs/fft_bench.yaml`
+- `build/build.ninja` - canonical local build graph used by the repo
+- `bin/` - linked executables produced by Ninja
+- `build/obj/` - intermediate object files produced by Ninja
+
+## Spec-Driven Generation
+
+FFT tests and FFT benchmark registrations are not written entirely by
+hand. Instead, the repo uses YAML specs as the source of truth:
+
+- `test/specs/fft.yaml` controls generated FFT doctest cases and their
+  tolerances for each SIMD mode
+- `bench/specs/fft_bench.yaml` controls generated benchmark registrations
+  and stores benchmark baselines used for delta reporting
+
+When these spec files change, Ninja regenerates the matching files in
+`test/generated/` and `bench/generated/` before compiling the owning
+targets.
+
+## Common Outputs
+
+- `bin/fft_tests` - doctest-based FFT validation suite
+- `bin/fft_bench` - Google Benchmark runner with spec-backed baseline reporting
+- `bin/fft_profile` - focused profiling entry point for LLVM MCA and `perf`
+- `bin/cheb_tests` - tests for Chebyshev approximation helpers
+- `bin/smooth_dist` - smooth-number exploration tool
+- `bin/roots_printer` - roots-of-unity printing utility
 
 ## Building Everything
 
-To build all components:
-
 ```bash
-build_fft
-build_tools
+ninja -f build/build.ninja all
 ```

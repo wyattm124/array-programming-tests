@@ -60,6 +60,15 @@ implementer can be confident in taking an idea from a math textbook
 to a portable C++ implementation with great performance and
 correctness.
 
+Originally I thought pure C++ could get much closer to the greatest
+possible performance, but after further investigation I realized that
+much better performance is possible through carefully crafting assembly
+or intrinsics based on the original mathematics of the problem and using
+C++ only for the scaffolding of the overall solution. So, the original
+goal has shifted some to include investigating what is required for, and
+possible with, carefully crafted, and CPU specifc, code beyond
+standard C++.
+
 Note that this repo focuses on CPU computing, but the computing model
 it focuses on is pretty general and could be used as a start for GPU
 programming in this problem space as well.

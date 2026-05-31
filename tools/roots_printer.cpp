@@ -1,5 +1,6 @@
 #include <iostream>
 #include <iomanip>
+#include <cmath>
 
 constexpr unsigned int N = 8;
 
@@ -7,7 +8,7 @@ constexpr unsigned int N = 8;
 //   approximate roots past 8 digits of precision
 int main() {
     for (int i = 0; i < N; i++) {
-        std::cout << std::fixed << std::setprecision(12) << std::cos((2 * M_PI * i) / N) 
-        << " " << std::sin((2 * M_PI * i) / N) << std::endl;
+        std::cout << std::fixed << std::setprecision(12) << cos((2 * M_PI * i) / N) 
+        << " " << sin((2 * M_PI * i) / N) << std::endl;
     }    
 }

@@ -1,305 +1,694 @@
+#include "../src/arch_config.hpp"
 #include "../src/fft.hpp"
 #include "fft_comp_unit.hpp"
 #include <benchmark/benchmark.h>
 #include <fftw3.h>
+#include <yaml-cpp/yaml.h>
 
+#include <algorithm>
+#include <cstdlib>
+#include <exception>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
-/// Base Class for Sizes
-template <unsigned int M>
-class Case : public benchmark::Fixture {
-public:
-    constexpr static unsigned int N = M;
-protected:
-    std::array<std::complex<float>, N> time_domain;
-    std::array<std::complex<float>, N> freq_domain;
-    
-    void SetUp(const benchmark::State& state) {
-        time_domain.fill(0);
-        freq_domain.fill(0);
-        FFT::wave_gen_lcg(time_domain.data(), freq_domain.data(), N);
-    }
+namespace {
+
+constexpr const char *kDefaultBenchmarkSpecPath = "bench/specs/fft_bench.yaml";
+
+struct BenchmarkBaseline {
+  double cpu_time_ns = 0.0;
 };
 
-// Base Cases
-using Case2 = Case<2>;
-using Case3 = Case<3>;
-using Case4 = Case<4>;
-using Case5 = Case<5>;
-using Case6 = Case<6>;
-using Case7 = Case<7>;
-using Case8 = Case<8>;
+using BaselineMap = std::unordered_map<std::string, BenchmarkBaseline>;
+using MeasuredBenchmarkMap = std::unordered_map<std::string, double>;
 
-// Power of 2 cases
-using PowerOf2 = Case<8192>;
+struct BenchmarkGroup {
+  std::string size_label;
+  std::string section_label;
+};
 
-// Medium Prime cases
-using MediumPrime = Case<53>;
-
-// Mersenne Prime cases
-using MersennePrime = Case<8191>;
-
-
-/// Base Classes for Processing Flows
 template <unsigned long N>
-void process_fftw(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
-    // Configure input with waves
-    fftwf_complex *out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
-    fftwf_plan p;
-
-    // Set the plan
-    p = fftwf_plan_dft_1d(N,
-        reinterpret_cast<fftwf_complex*>(time_domain.data()),
-        out, FFTW_FORWARD, FFTW_MEASURE);
-
-    // Benchmark
-    for (auto _ : state) {
-        fftwf_execute(p);
-    }
-
-    // Cleanup
-    fftwf_destroy_plan(p);
-    fftwf_free(out);
+void init_case(float (&time_domain)[2 * N], float (&freq_domain)[2 * N]) {
+  std::fill_n(time_domain, 2 * N, 0.0f);
+  std::fill_n(freq_domain, 2 * N, 0.0f);
+  FFT::wave_gen_lcg(time_domain, freq_domain, N);
 }
 
 template <unsigned long N>
-void process_fftw_with_alloc(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
-    // Configure input with waves
-    fftwf_complex *in, *out;
-    fftwf_plan p;
-    std::vector<fftwf_complex *> buffs;
-
-    // Benchmark
-    for (auto _ : state) {
-        // Allocate fftw specific memory
-        in = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
-        out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
-        
-        // Set the plan
-        p = fftwf_plan_dft_1d(N, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
-        
-        // Copy the input to the appropriate location
-        std::copy(
-            reinterpret_cast<const float*>(&time_domain[0]),
-            reinterpret_cast<const float*>(&time_domain[0] + N),
-            reinterpret_cast<float*>(in)
-        );
-        
-        // Execute the fft itself
-        fftwf_execute(p);
-
-        // Free memory later
-        buffs.push_back(in);
-        buffs.push_back(out);
-
-        // Cleanup plan for reset
-        fftwf_destroy_plan(p);
-    }
-
-    for (auto buf : buffs) {
-        fftwf_free(buf);
-    }
+void interleaved_to_split(const float *interleaved, float *real, float *imag) {
+  for (unsigned long i = 0; i < N; i++) {
+    real[i] = interleaved[2 * i];
+    imag[i] = interleaved[2 * i + 1];
+  }
 }
 
-template <unsigned long N>
-void process_neon(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
-    // Need to Copy Data to Correct Type
-    std::array<float32x2_t, N> temp_time_domain;
-    std::array<float32x2_t, N> temp_freq_domain;
-    for (unsigned int i = 0; i < N; i++) {
-        temp_time_domain[i] = {time_domain[i].real(), time_domain[i].imag()};
-    }
-
-    // Make sure to do initialization
-    FFT::FFTPlan<float32x2_t>::Init<N>();
-
-    for (auto _ : state) {
-        FFT::FFTPlan<float32x2_t>::fft<N>(temp_time_domain.data(), temp_freq_domain.data());
-    }
+double adjusted_cpu_time_ns(const benchmark::BenchmarkReporter::Run &run) {
+  const double adjusted = run.GetAdjustedCPUTime();
+  switch (run.time_unit) {
+  case benchmark::kNanosecond:
+    return adjusted;
+  case benchmark::kMicrosecond:
+    return adjusted * 1e3;
+  case benchmark::kMillisecond:
+    return adjusted * 1e6;
+  case benchmark::kSecond:
+    return adjusted * 1e9;
+  }
+  return adjusted;
 }
 
-template <unsigned long N>
-void process_stdcomplexwrap(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
-    std::array<FFT::StdComplexWrap<float>, N> temp_freq_domain;
-
-    // Make sure to do initialization
-    FFT::FFTPlan<FFT::StdComplexWrap<float>>::Init<N>();
-
-    for (auto _ : state) {
-        FFT::FFTPlan<FFT::StdComplexWrap<float>>::fft<N>(
-            static_cast<FFT::StdComplexWrap<float>*>(time_domain.data()),
-            temp_freq_domain.data()
-        );
-    }
+std::string benchmark_name(unsigned long size, const char *kind,
+                           std::optional<std::string> simd = std::nullopt) {
+  std::string name = "N" + std::to_string(size) + "/" + kind;
+  if (simd.has_value() &&
+      (*simd != "NONE" || std::string_view(kind) == "RawFFT")) {
+    name += " [" + *simd + "]";
+  }
+  return name;
 }
 
-template <unsigned long N>
-void process_customcomplex(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
-    // Need to Copy Data to Correct Type
-    std::array<FFT::Complex, N> temp_time_domain;
-    std::array<FFT::Complex, N> temp_freq_domain;
-    for (unsigned int i = 0; i < N; i++) {
-        temp_time_domain[i] = {time_domain[i]};
-    }
-
-    // Make sure to do initialization
-    FFT::FFTPlan<FFT::Complex>::Init<N>();
-
-    for (auto _ : state) {
-        FFT::FFTPlan<FFT::Complex>::fft<N>(temp_time_domain.data(), temp_freq_domain.data());
-    }
+std::optional<double> parse_baseline_cpu_time_ns(const YAML::Node &config) {
+  if (!config || config.IsNull()) {
+    return std::nullopt;
+  }
+  if (config.IsScalar()) {
+    return config.as<double>();
+  }
+  if (!config.IsMap()) {
+    throw std::runtime_error(
+        "benchmark config entries must be scalars or mappings.");
+  }
+  const YAML::Node baseline = config["baseline_cpu_time_ns"];
+  if (!baseline) {
+    return std::nullopt;
+  }
+  return baseline.as<double>();
 }
 
-template <unsigned long N>
-void process_comp_unit(benchmark::State& state, std::array<std::complex<float>, N>& time_domain) {
-    // Need to Copy Data to Correct Type
-    std::array<FFT::Complex, N> temp_time_domain;
-    std::array<FFT::Complex, N> temp_freq_domain;
-    for (unsigned int i = 0; i < N; i++) {
-        temp_time_domain[i] = {time_domain[i]};
+template <typename Callback>
+void for_each_enabled_variant(const YAML::Node &node, const char *field_name,
+                              Callback &&callback) {
+  if (!node) {
+    return;
+  }
+  if (node.IsSequence()) {
+    for (const auto &entry : node) {
+      callback(entry.as<std::string>(), YAML::Node());
+    }
+    return;
+  }
+  if (!node.IsMap()) {
+    throw std::runtime_error(std::string("'") + field_name +
+                             "' must be a sequence or mapping.");
+  }
+  for (const auto &entry : node) {
+    callback(entry.first.as<std::string>(), entry.second);
+  }
+}
+
+BaselineMap load_baselines(const std::string &path) {
+  BaselineMap baselines;
+
+  std::ifstream stream(path);
+  if (!stream.good()) {
+    std::cerr << "warning: benchmark spec file not found: " << path << "\n";
+    return baselines;
+  }
+
+  const YAML::Node root = YAML::Load(stream);
+  const YAML::Node benchmarks = root["benchmarks"];
+  if (!benchmarks) {
+    return baselines;
+  }
+  if (!benchmarks.IsSequence()) {
+    throw std::runtime_error("'benchmarks' must be a YAML sequence.");
+  }
+
+  for (const auto &case_node : benchmarks) {
+    const unsigned long size = case_node["size"].as<unsigned long>();
+
+    if (const auto comp_unit_baseline =
+            parse_baseline_cpu_time_ns(case_node["comp_unit_raw"])) {
+      baselines.emplace(benchmark_name(size, "CompUnitRaw"),
+                        BenchmarkBaseline{*comp_unit_baseline});
     }
 
-    for (auto _ : state) {
-        if constexpr (N == 2) {
-            FFT::fft_2(temp_time_domain.data(), temp_freq_domain.data());
-        } else if constexpr (N == 3) {
-            FFT::fft_3(temp_time_domain.data(), temp_freq_domain.data());
-        } else if constexpr (N == 4) {
-            FFT::fft_4(temp_time_domain.data(), temp_freq_domain.data());
-        } else if constexpr (N == 5) {
-            FFT::fft_5(temp_time_domain.data(), temp_freq_domain.data());
-        } else if constexpr (N == 6) {
-            FFT::fft_6(temp_time_domain.data(), temp_freq_domain.data());
-        } else if constexpr (N == 7) {
-            FFT::fft_7(temp_time_domain.data(), temp_freq_domain.data());
-        } else if constexpr (N == 8) {
-            FFT::fft_8(temp_time_domain.data(), temp_freq_domain.data());
+    for_each_enabled_variant(
+        case_node["raw_fft"], "raw_fft",
+        [&](const std::string &simd, const YAML::Node &config) {
+          const auto baseline = parse_baseline_cpu_time_ns(config);
+          if (!baseline) {
+            return;
+          }
+          baselines.emplace(benchmark_name(size, "RawFFT", simd),
+                            BenchmarkBaseline{*baseline});
+        });
+
+    if (const auto fftw_baseline =
+            parse_baseline_cpu_time_ns(case_node["fftw"])) {
+      baselines.emplace(benchmark_name(size, "FFTW"),
+                        BenchmarkBaseline{*fftw_baseline});
+    }
+  }
+
+  return baselines;
+}
+
+bool should_update_baselines() {
+  const char *value = std::getenv("FFT_BENCH_UPDATE_BASELINES");
+  if (value == nullptr) {
+    return false;
+  }
+
+  const std::string normalized(value);
+  return !normalized.empty() && normalized != "0" && normalized != "false" &&
+         normalized != "FALSE" && normalized != "no" && normalized != "NO";
+}
+
+void set_baseline_value(YAML::Node node, double cpu_time_ns) {
+  if (!node || !node.IsMap()) {
+    node = YAML::Node(YAML::NodeType::Map);
+  }
+  node["baseline_cpu_time_ns"] = cpu_time_ns;
+}
+
+void update_baseline_spec(const std::string &path,
+                          const MeasuredBenchmarkMap &measured_benchmarks) {
+  std::ifstream stream(path);
+  if (!stream.good()) {
+    throw std::runtime_error("benchmark spec file not found: " + path);
+  }
+
+  YAML::Node root = YAML::Load(stream);
+  YAML::Node benchmarks = root["benchmarks"];
+  if (!benchmarks || !benchmarks.IsSequence()) {
+    throw std::runtime_error("'benchmarks' must be a YAML sequence.");
+  }
+
+  for (auto case_node : benchmarks) {
+    const unsigned long size = case_node["size"].as<unsigned long>();
+
+    const auto comp_unit_it =
+        measured_benchmarks.find(benchmark_name(size, "CompUnitRaw"));
+    if (comp_unit_it != measured_benchmarks.end() &&
+        case_node["comp_unit_raw"]) {
+      set_baseline_value(case_node["comp_unit_raw"], comp_unit_it->second);
+    }
+
+    if (case_node["raw_fft"] && case_node["raw_fft"].IsMap()) {
+      for (const auto &entry : case_node["raw_fft"]) {
+        const std::string simd = entry.first.as<std::string>();
+        const auto raw_fft_it =
+            measured_benchmarks.find(benchmark_name(size, "RawFFT", simd));
+        if (raw_fft_it != measured_benchmarks.end()) {
+          set_baseline_value(case_node["raw_fft"][simd], raw_fft_it->second);
         }
-    } 
+      }
+    }
+
+    const auto fftw_it = measured_benchmarks.find(benchmark_name(size, "FFTW"));
+    if (fftw_it != measured_benchmarks.end() && case_node["fftw"]) {
+      set_baseline_value(case_node["fftw"], fftw_it->second);
+    }
+  }
+
+  YAML::Emitter emitter;
+  emitter << root;
+  if (!emitter.good()) {
+    throw std::runtime_error("failed to serialize benchmark spec YAML.");
+  }
+
+  std::ofstream out(path, std::ios::trunc);
+  if (!out.good()) {
+    throw std::runtime_error("failed to open benchmark spec for writing: " +
+                             path);
+  }
+  out << emitter.c_str() << '\n';
 }
 
-BENCHMARK_DEFINE_F(Case2, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
+class BaselineDeltaReporter : public benchmark::ConsoleReporter {
+public:
+  explicit BaselineDeltaReporter(BaselineMap baselines)
+      : benchmark::ConsoleReporter(), baselines_(std::move(baselines)) {}
+
+  MeasuredBenchmarkMap measured_cpu_times() const {
+    MeasuredBenchmarkMap measured;
+    for (const auto &run : buffered_runs_) {
+      if (run.run_type != Run::RT_Iteration) {
+        continue;
+      }
+      measured[run.benchmark_name()] = adjusted_cpu_time_ns(run);
+    }
+    return measured;
+  }
+
+protected:
+  bool ReportContext(const Context &context) override {
+    return benchmark::ConsoleReporter::ReportContext(context);
+  }
+
+  void ReportRuns(const std::vector<Run> &reports) override {
+    buffered_runs_.insert(buffered_runs_.end(), reports.begin(), reports.end());
+  }
+
+  void Finalize() override {
+    if (buffered_runs_.empty()) {
+      return;
+    }
+
+    std::vector<const Run *> sorted_runs;
+    sorted_runs.reserve(buffered_runs_.size());
+    for (const auto &run : buffered_runs_) {
+      sorted_runs.push_back(&run);
+    }
+
+    std::stable_sort(sorted_runs.begin(), sorted_runs.end(),
+                     [](const Run *lhs, const Run *rhs) {
+                       return sort_key(*lhs) < sort_key(*rhs);
+                     });
+
+    name_field_width_ = 9;
+    for (const Run *run : sorted_runs) {
+      name_field_width_ = std::max<std::size_t>(
+          name_field_width_, display_name(*run, parse_group(*run)).size());
+    }
+
+    current_size_label_.clear();
+    PrintHeader(*sorted_runs.front());
+    for (const Run *run : sorted_runs) {
+      print_buffered_run(*run);
+    }
+  }
+
+private:
+  struct SortKey {
+    unsigned long size = 0;
+    int section_rank = 0;
+    int simd_rank = 0;
+    int run_rank = 0;
+    std::string section_label;
+    std::string aggregate_name;
+
+    auto operator<=>(const SortKey &) const = default;
+  };
+
+  void PrintHeader(const Run &run) override {
+    std::ostream &out = GetOutputStream();
+    const std::size_t total_width = name_field_width_ + kTimeWidth + kCpuWidth +
+                                    kIterationsWidth + kBaselineWidth +
+                                    kDeltaWidth + kChangeWidth;
+
+    out << std::string(total_width, '-') << '\n'
+        << std::left << std::setw(static_cast<int>(name_field_width_))
+        << "Benchmark" << std::right << std::setw(kTimeWidth) << "Time"
+        << std::setw(kCpuWidth) << "CPU" << std::setw(kIterationsWidth)
+        << "Iterations" << std::setw(kBaselineWidth) << "Baseline"
+        << std::setw(kDeltaWidth) << "Delta" << std::setw(kChangeWidth)
+        << "Change" << '\n'
+        << std::string(total_width, '-') << '\n';
+  }
+
+  void print_buffered_run(const Run &run) {
+    std::ostream &out = GetOutputStream();
+    const BenchmarkGroup group = parse_group(run);
+    emit_group_headers(group);
+    const std::string row_label = display_name(run, group);
+
+    out << std::left << std::setw(static_cast<int>(name_field_width_))
+        << row_label
+        << colorized_time_cell(
+               format_time(run.GetAdjustedRealTime(), run.time_unit),
+               kTimeWidth)
+        << colorized_time_cell(
+               format_time(run.GetAdjustedCPUTime(), run.time_unit), kCpuWidth)
+        << colorized_info_cell(std::to_string(run.iterations),
+                               kIterationsWidth);
+
+    const auto it = baselines_.find(run.benchmark_name());
+    if (run.run_type != Run::RT_Iteration || it == baselines_.end() ||
+        it->second.cpu_time_ns == 0.0) {
+      out << padded_cell("", kBaselineWidth) << padded_cell("", kDeltaWidth)
+          << padded_cell("", kChangeWidth) << '\n';
+      return;
+    }
+
+    const double current_ns = adjusted_cpu_time_ns(run);
+    const double baseline_ns = it->second.cpu_time_ns;
+    const double delta_ns = current_ns - baseline_ns;
+    const double delta_pct = (delta_ns / baseline_ns) * 100.0;
+
+    out << colorized_info_cell(format_ns(baseline_ns), kBaselineWidth)
+        << colorized_cell(format_delta_ns(delta_ns), kDeltaWidth, delta_ns)
+        << colorized_cell(format_delta_pct(delta_pct), kChangeWidth, delta_ns)
+        << '\n';
+  }
+
+  static constexpr int kTimeWidth = 14;
+  static constexpr int kCpuWidth = 14;
+  static constexpr int kIterationsWidth = 14;
+  static constexpr int kBaselineWidth = 14;
+  static constexpr int kDeltaWidth = 14;
+  static constexpr int kChangeWidth = 12;
+  static constexpr double kNanosecondsPerMicrosecond = 1e3;
+  static constexpr double kNanosecondsPerSecond = 1e9;
+
+  static const char *time_unit_suffix(benchmark::TimeUnit unit) {
+    switch (unit) {
+    case benchmark::kNanosecond:
+      return "ns";
+    case benchmark::kMicrosecond:
+      return "us";
+    case benchmark::kMillisecond:
+      return "ms";
+    case benchmark::kSecond:
+      return "s";
+    }
+    return "";
+  }
+
+  static std::string format_fixed(double value, int precision,
+                                  const char *suffix, bool show_pos = false) {
+    std::ostringstream stream;
+    if (show_pos) {
+      stream << std::showpos;
+    }
+    stream << std::fixed << std::setprecision(precision) << value;
+    if (suffix[0] != '\0') {
+      stream << ' ' << suffix;
+    }
+    return stream.str();
+  }
+
+  static std::string format_time(double value, benchmark::TimeUnit unit) {
+    if (unit == benchmark::kNanosecond &&
+        std::abs(value) >= kNanosecondsPerSecond) {
+      return format_fixed(value / kNanosecondsPerMicrosecond, 2, "us");
+    }
+    return format_fixed(value, 2, time_unit_suffix(unit));
+  }
+
+  static std::string format_ns(double value) {
+    if (std::abs(value) >= kNanosecondsPerSecond) {
+      return format_fixed(value / kNanosecondsPerMicrosecond, 2, "us");
+    }
+    return format_fixed(value, 2, "ns");
+  }
+
+  static std::string format_delta_ns(double value) {
+    if (std::abs(value) >= kNanosecondsPerSecond) {
+      return format_fixed(value / kNanosecondsPerMicrosecond, 2, "us", true);
+    }
+    return format_fixed(value, 2, "ns", true);
+  }
+
+  static std::string format_delta_pct(double value) {
+    return format_fixed(value, 2, "%", true);
+  }
+
+  static std::string padded_cell(const std::string &text, int width) {
+    std::ostringstream stream;
+    stream << std::right;
+    stream << std::setw(width) << text;
+    return stream.str();
+  }
+
+  static BenchmarkGroup parse_group(const Run &run) {
+    const std::string function_name = run.run_name.function_name.empty()
+                                          ? run.benchmark_name()
+                                          : run.run_name.function_name;
+    const std::size_t slash = function_name.find('/');
+    if (slash == std::string::npos) {
+      return {"Benchmark", function_name};
+    }
+
+    std::string size_label = function_name.substr(0, slash);
+    if (!size_label.empty() && size_label.front() == 'N') {
+      size_label = "FFT Size " + size_label.substr(1);
+    }
+
+    return {size_label, function_name.substr(slash + 1)};
+  }
+
+  static unsigned long parse_size_value(const Run &run) {
+    const std::string function_name = run.run_name.function_name.empty()
+                                          ? run.benchmark_name()
+                                          : run.run_name.function_name;
+    const std::size_t slash = function_name.find('/');
+    if (slash == std::string::npos || slash < 2 ||
+        function_name.front() != 'N') {
+      return 0;
+    }
+    return static_cast<unsigned long>(
+        std::strtoul(function_name.substr(1, slash - 1).c_str(), nullptr, 10));
+  }
+
+  static std::pair<std::string, std::string>
+  split_section_and_simd(const std::string &section_label) {
+    const std::size_t bracket = section_label.find(" [");
+    if (bracket == std::string::npos || section_label.back() != ']') {
+      return {section_label, ""};
+    }
+    return {
+        section_label.substr(0, bracket),
+        section_label.substr(bracket + 2, section_label.size() - bracket - 3)};
+  }
+
+  static int section_rank(const std::string &kind) {
+    if (kind == "CompUnitRaw") {
+      return 0;
+    }
+    if (kind == "RawFFT") {
+      return 1;
+    }
+    if (kind == "FFTW") {
+      return 2;
+    }
+    return 3;
+  }
+
+  static int simd_rank(const std::string &simd) {
+    if (simd == "NONE") {
+      return 0;
+    }
+    if (simd == "AVX2") {
+      return 1;
+    }
+    if (simd == "NEON") {
+      return 2;
+    }
+    return 3;
+  }
+
+  static SortKey sort_key(const Run &run) {
+    const BenchmarkGroup group = parse_group(run);
+    const auto [kind, simd] = split_section_and_simd(group.section_label);
+    return SortKey{
+        parse_size_value(run), section_rank(kind),
+        simd_rank(simd),       run.run_type == Run::RT_Iteration ? 0 : 1,
+        group.section_label,   run.aggregate_name,
+    };
+  }
+
+  static std::string display_name(const Run &run, const BenchmarkGroup &group) {
+    if (run.run_type == Run::RT_Iteration) {
+      return "  " + group.section_label;
+    }
+    if (run.run_type == Run::RT_Aggregate && !run.aggregate_name.empty()) {
+      return "    " + run.aggregate_name;
+    }
+    return "";
+  }
+
+  void emit_group_headers(const BenchmarkGroup &group) {
+    std::ostream &out = GetOutputStream();
+
+    if (group.size_label != current_size_label_) {
+      if (!current_size_label_.empty()) {
+        out << '\n';
+      }
+      out << group.size_label << '\n';
+      current_size_label_ = group.size_label;
+    }
+  }
+
+  std::string colorized_time_cell(const std::string &text, int width) const {
+    const std::string padded = padded_cell(text, width);
+    if (!(output_options_ & benchmark::ConsoleReporter::OO_Color)) {
+      return padded;
+    }
+    return std::string("\033[33m") + padded + "\033[0m";
+  }
+
+  std::string colorized_info_cell(const std::string &text, int width) const {
+    const std::string padded = padded_cell(text, width);
+    if (!(output_options_ & benchmark::ConsoleReporter::OO_Color)) {
+      return padded;
+    }
+    return std::string("\033[36m") + padded + "\033[0m";
+  }
+
+  std::string colorized_cell(const std::string &text, int width,
+                             double delta_ns) const {
+    const std::string padded = padded_cell(text, width);
+    if (!(output_options_ & benchmark::ConsoleReporter::OO_Color) ||
+        delta_ns == 0.0) {
+      return padded;
+    }
+
+    const char *color = delta_ns < 0.0 ? "\033[32m" : "\033[31m";
+    return std::string(color) + padded + "\033[0m";
+  }
+
+  BaselineMap baselines_;
+  std::vector<Run> buffered_runs_;
+  std::string current_size_label_;
+};
+
+template <unsigned long N>
+void process_fftw(benchmark::State &state, const float *time_domain) {
+  fftwf_iodim dims[1] = {{static_cast<int>(N), 1, 1}};
+  float *in_real = static_cast<float *>(fftwf_malloc(sizeof(float) * N));
+  float *in_imag = static_cast<float *>(fftwf_malloc(sizeof(float) * N));
+  float *out_real = static_cast<float *>(fftwf_malloc(sizeof(float) * N));
+  float *out_imag = static_cast<float *>(fftwf_malloc(sizeof(float) * N));
+  interleaved_to_split<N>(time_domain, in_real, in_imag);
+  fftwf_plan p = fftwf_plan_guru_split_dft(
+      1, dims, 0, nullptr, in_real, in_imag, out_real, out_imag, FFTW_MEASURE);
+
+  for (auto _ : state) {
+    fftwf_execute(p);
+  }
+
+  fftwf_destroy_plan(p);
+  fftwf_free(in_real);
+  fftwf_free(in_imag);
+  fftwf_free(out_real);
+  fftwf_free(out_imag);
 }
 
-BENCHMARK_DEFINE_F(Case3, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
+template <unsigned long N, SIMD_TYPE simd>
+void process_fft(benchmark::State &state, const float *time_domain) {
+  alignas(MY_MAX_ALIGNMENT) float temp_time_domain[2 * N];
+  alignas(MY_MAX_ALIGNMENT) float temp_freq_domain[2 * N] = {0};
+  std::copy_n(time_domain, 2 * N, temp_time_domain);
+  FFT::FFTPlan<float, simd>::template Init<N>();
+
+  for (auto _ : state) {
+    FFT::FFTPlan<float, simd>::template fft<N>(temp_time_domain,
+                                               temp_freq_domain);
+  }
 }
 
-BENCHMARK_DEFINE_F(Case4, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
+template <unsigned long N>
+void process_comp_unit(benchmark::State &state, const float *time_domain) {
+  static_assert(N >= 2 && N <= 8,
+                "Comp unit benchmark only supports sizes 2 through 8.");
+  alignas(MY_MAX_ALIGNMENT) float temp_time_domain[2 * N];
+  alignas(MY_MAX_ALIGNMENT) float temp_freq_domain[2 * N] = {0};
+  std::copy_n(time_domain, 2 * N, temp_time_domain);
+
+  for (auto _ : state) {
+    if constexpr (N == 2) {
+      FFT::fft_2(temp_time_domain, temp_freq_domain);
+    } else if constexpr (N == 3) {
+      FFT::fft_3(temp_time_domain, temp_freq_domain);
+    } else if constexpr (N == 4) {
+      FFT::fft_4(temp_time_domain, temp_freq_domain);
+    } else if constexpr (N == 5) {
+      FFT::fft_5(temp_time_domain, temp_freq_domain);
+    } else if constexpr (N == 6) {
+      FFT::fft_6(temp_time_domain, temp_freq_domain);
+    } else if constexpr (N == 7) {
+      FFT::fft_7(temp_time_domain, temp_freq_domain);
+    } else if constexpr (N == 8) {
+      FFT::fft_8(temp_time_domain, temp_freq_domain);
+    }
+  }
 }
 
-BENCHMARK_DEFINE_F(Case5, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
+template <unsigned long N> void register_comp_unit_benchmark(const char *name) {
+  benchmark::RegisterBenchmark(name, [](benchmark::State &state) {
+    alignas(MY_MAX_ALIGNMENT) float time_domain[2 * N];
+    alignas(MY_MAX_ALIGNMENT) float freq_domain[2 * N];
+    init_case<N>(time_domain, freq_domain);
+    process_comp_unit<N>(state, time_domain);
+  });
 }
 
-BENCHMARK_DEFINE_F(Case6, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
+template <unsigned long N, SIMD_TYPE simd>
+void register_fft_benchmark(const char *name) {
+  benchmark::RegisterBenchmark(name, [](benchmark::State &state) {
+    alignas(MY_MAX_ALIGNMENT) float time_domain[2 * N];
+    alignas(MY_MAX_ALIGNMENT) float freq_domain[2 * N];
+    init_case<N>(time_domain, freq_domain);
+    process_fft<N, simd>(state, time_domain);
+  });
 }
 
-BENCHMARK_DEFINE_F(Case7, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
+template <unsigned long N> void register_fftw_benchmark(const char *name) {
+  benchmark::RegisterBenchmark(name, [](benchmark::State &state) {
+    alignas(MY_MAX_ALIGNMENT) float time_domain[2 * N];
+    alignas(MY_MAX_ALIGNMENT) float freq_domain[2 * N];
+    init_case<N>(time_domain, freq_domain);
+    process_fftw<N>(state, time_domain);
+  });
 }
 
-BENCHMARK_DEFINE_F(Case8, CompUnitComplex)(benchmark::State& state) {
-    process_comp_unit(state, time_domain);
+void register_generated_benchmarks() {
+#include "generated/fft_bench_none.inc"
+#if FFT_HAS_AVX2
+#include "generated/fft_bench_avx2.inc"
+#endif
+#if FFT_HAS_NEON
+#include "generated/fft_bench_neon.inc"
+#endif
 }
 
-BENCHMARK_DEFINE_F(Case2, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
+} // namespace
+
+int main(int argc, char **argv) {
+  benchmark::Initialize(&argc, argv);
+  if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
+    return 1;
+  }
+
+  register_generated_benchmarks();
+
+  const char *spec_path_env = std::getenv("FFT_BENCH_SPEC");
+  const std::string spec_path =
+      spec_path_env != nullptr ? spec_path_env : kDefaultBenchmarkSpecPath;
+
+  BaselineMap baselines;
+  try {
+    baselines = load_baselines(spec_path);
+  } catch (const std::exception &ex) {
+    std::cerr << "error: failed to load benchmark data from " << spec_path
+              << ": " << ex.what() << "\n";
+    return 1;
+  }
+
+  BaselineDeltaReporter reporter(std::move(baselines));
+  benchmark::RunSpecifiedBenchmarks(&reporter);
+
+  if (should_update_baselines()) {
+    try {
+      update_baseline_spec(spec_path, reporter.measured_cpu_times());
+      std::cout << "updated benchmark baselines in " << spec_path << "\n";
+    } catch (const std::exception &ex) {
+      std::cerr << "error: failed to update benchmark baselines in "
+                << spec_path << ": " << ex.what() << "\n";
+      benchmark::Shutdown();
+      return 1;
+    }
+  }
+
+  benchmark::Shutdown();
+  return 0;
 }
-
-BENCHMARK_DEFINE_F(Case3, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case4, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case5, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case6, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case7, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(Case8, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(PowerOf2, Neon)(benchmark::State& state) {
-    process_neon(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(PowerOf2, CustomComplex)(benchmark::State& state) {
-    process_customcomplex(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(PowerOf2, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(PowerOf2, FFTWWithAlloc)(benchmark::State& state) {
-    process_fftw_with_alloc(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(PowerOf2, StdComplexWrap)(benchmark::State& state) {
-    process_stdcomplexwrap(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(MediumPrime, CustomComplex)(benchmark::State& state) {
-    process_customcomplex(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(MediumPrime, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(MersennePrime, CustomComplex)(benchmark::State& state) {
-    process_customcomplex(state, time_domain);
-}
-
-BENCHMARK_DEFINE_F(MersennePrime, FFTW)(benchmark::State& state) {
-    process_fftw(state, time_domain);
-}
-
-// Base Case Benchmarks
-BENCHMARK_REGISTER_F(Case2, CompUnitComplex);
-BENCHMARK_REGISTER_F(Case2, FFTW);
-BENCHMARK_REGISTER_F(Case3, CompUnitComplex);
-BENCHMARK_REGISTER_F(Case3, FFTW);
-BENCHMARK_REGISTER_F(Case4, CompUnitComplex);
-BENCHMARK_REGISTER_F(Case4, FFTW);
-BENCHMARK_REGISTER_F(Case5, CompUnitComplex);
-BENCHMARK_REGISTER_F(Case5, FFTW);
-BENCHMARK_REGISTER_F(Case6, CompUnitComplex);
-BENCHMARK_REGISTER_F(Case6, FFTW);
-BENCHMARK_REGISTER_F(Case7, CompUnitComplex);
-BENCHMARK_REGISTER_F(Case7, FFTW);
-BENCHMARK_REGISTER_F(Case8, CompUnitComplex);
-BENCHMARK_REGISTER_F(Case8, FFTW);
-
-// Power of 2 Benchmarks
-BENCHMARK_REGISTER_F(PowerOf2, Neon);
-BENCHMARK_REGISTER_F(PowerOf2, CustomComplex);
-BENCHMARK_REGISTER_F(PowerOf2, FFTW);
-BENCHMARK_REGISTER_F(PowerOf2, FFTWWithAlloc);
-BENCHMARK_REGISTER_F(PowerOf2, StdComplexWrap);
-
-// Medium Prime Benchmarks
-BENCHMARK_REGISTER_F(MediumPrime, CustomComplex);
-BENCHMARK_REGISTER_F(MediumPrime, FFTW);
-
-// Mersenne Prime Benchmarks
-BENCHMARK_REGISTER_F(MersennePrime, CustomComplex);
-BENCHMARK_REGISTER_F(MersennePrime, FFTW);
-
-// Template out main
-BENCHMARK_MAIN();

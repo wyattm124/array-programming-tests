@@ -1,3 +1,9 @@
-/bin
+build/*
+!/build/build.ninja
+bin/*
 !/bin/.gitkeep
+test/generated/*
+!/test/generated/.gitkeep
 result
+bench/generated/*
+!/bench/generated/.gitkeep

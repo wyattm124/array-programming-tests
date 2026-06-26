@@ -84,6 +84,31 @@
         '';
       };
 
-      packages.default = devShells.default; 
+      packages.fftCompiler = stdenv.mkDerivation {
+        pname = "fft-compiler";
+        version = "0.1.0";
+        src = builtins.path {
+          path = ./.;
+          name = "array-programming-tests-source";
+        };
+        nativeBuildInputs = [ pkgs.ninja stdenv.cc ];
+        dontConfigure = true;
+
+        buildPhase = ''
+          export FFT_ARCH_FLAGS="${archCompileFlags}"
+          ninja -f build/build.ninja bin/fft_compiler
+        '';
+
+        installPhase = ''
+          mkdir -p $out/bin
+          cp bin/fft_compiler $out/bin/
+        '';
+      };
+
+      packages.default = packages.fftCompiler;
+      apps.fftCompiler = flake-utils.lib.mkApp {
+        drv = packages.fftCompiler;
+        exePath = "/bin/fft_compiler";
+      };
     });
 }

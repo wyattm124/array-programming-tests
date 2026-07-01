@@ -7,12 +7,14 @@ fft_compile_flags = -O3 $$FFT_ARCH_FLAGS $$CXXFLAGS
 fft_profile_compile_flags = -O3 -g $$FFT_ARCH_FLAGS $$CXXFLAGS
 tool_compile_flags = -O2 $$FFT_ARCH_FLAGS $$CXXFLAGS
 compiler_prime_factor_header_unit_flags = -fmodule-file=build/modules/utility.pcm -fmodule-file=build/modules/vector.pcm
-compiler_graph_header_unit_flags = -fmodule-file=build/modules/memory.pcm -fmodule-file=build/modules/utility.pcm -fmodule-file=build/modules/vector.pcm
-compiler_cli_header_unit_flags = -fmodule-file=build/modules/charconv.pcm -fmodule-file=build/modules/iostream.pcm -fmodule-file=build/modules/optional.pcm -fmodule-file=build/modules/string_view.pcm
+compiler_graph_header_unit_flags = -fmodule-file=build/modules/memory.pcm -fmodule-file=build/modules/string.pcm -fmodule-file=build/modules/utility.pcm -fmodule-file=build/modules/vector.pcm
+compiler_dot_header_unit_flags = -fmodule-file=build/modules/filesystem.pcm -fmodule-file=build/modules/fstream.pcm -fmodule-file=build/modules/memory.pcm -fmodule-file=build/modules/sstream.pcm -fmodule-file=build/modules/string.pcm -fmodule-file=build/modules/string_view.pcm -fmodule-file=build/modules/vector.pcm
+compiler_cli_header_unit_flags = -fmodule-file=build/modules/charconv.pcm -fmodule-file=build/modules/iostream.pcm -fmodule-file=build/modules/optional.pcm -fmodule-file=build/modules/string_view.pcm -fmodule-file=build/modules/vector.pcm
 compiler_module_flags = $tool_compile_flags -fprebuilt-module-path=build/modules
 compiler_prime_factor_module_flags = $compiler_module_flags $compiler_prime_factor_header_unit_flags
 compiler_graph_module_flags = $compiler_module_flags $compiler_graph_header_unit_flags
-compiler_cli_module_flags = $compiler_graph_module_flags $compiler_cli_header_unit_flags
+compiler_dot_module_flags = $compiler_module_flags $compiler_dot_header_unit_flags
+compiler_cli_module_flags = $compiler_dot_module_flags $compiler_cli_header_unit_flags
 fftw_libs = -lfftw3f
 benchmark_libs = -lbenchmark -pthread -lfftw3f -lyaml-cpp
 
@@ -95,9 +97,25 @@ build build/obj/tools/smooth_dist.o: cxx tools/smooth_dist.cpp
 build build/obj/tools/roots_printer.o: cxx tools/roots_printer.cpp
   flags = $tool_compile_flags
 
+build build/modules/filesystem.pcm: cxx_system_header
+  flags = $tool_compile_flags
+  header = filesystem
+
+build build/modules/fstream.pcm: cxx_system_header
+  flags = $tool_compile_flags
+  header = fstream
+
 build build/modules/memory.pcm: cxx_system_header
   flags = $tool_compile_flags
   header = memory
+
+build build/modules/sstream.pcm: cxx_system_header
+  flags = $tool_compile_flags
+  header = sstream
+
+build build/modules/string.pcm: cxx_system_header
+  flags = $tool_compile_flags
+  header = string
 
 build build/modules/utility.pcm: cxx_system_header
   flags = $tool_compile_flags
@@ -129,13 +147,19 @@ build build/modules/fft.compiler.prime_factor.pcm: cxx_module_precompile compile
 build build/obj/compiler/prime_factor.o: cxx_module_object compiler/prime_factor.cppm | build/modules/fft.compiler.prime_factor.pcm build/modules/utility.pcm build/modules/vector.pcm
   flags = $compiler_prime_factor_module_flags
 
-build build/modules/fft.compiler.graph.pcm: cxx_module_precompile compiler/algebraic_fft_ast_builder.cppm | build/modules/fft.compiler.prime_factor.pcm build/modules/memory.pcm build/modules/utility.pcm build/modules/vector.pcm
+build build/modules/fft.compiler.graph.pcm: cxx_module_precompile compiler/algebraic_fft_ast_builder.cppm | build/modules/fft.compiler.prime_factor.pcm build/modules/memory.pcm build/modules/string.pcm build/modules/utility.pcm build/modules/vector.pcm
   flags = $compiler_graph_module_flags
 
-build build/obj/compiler/algebraic_fft_ast_builder.o: cxx_module_object compiler/algebraic_fft_ast_builder.cppm | build/modules/fft.compiler.graph.pcm build/modules/fft.compiler.prime_factor.pcm build/modules/memory.pcm build/modules/utility.pcm build/modules/vector.pcm
+build build/obj/compiler/algebraic_fft_ast_builder.o: cxx_module_object compiler/algebraic_fft_ast_builder.cppm | build/modules/fft.compiler.graph.pcm build/modules/fft.compiler.prime_factor.pcm build/modules/memory.pcm build/modules/string.pcm build/modules/utility.pcm build/modules/vector.pcm
   flags = $compiler_graph_module_flags
 
-build build/obj/compiler/fft_compiler_cli.o: cxx compiler/fft_compiler_cli.cpp | build/modules/fft.compiler.graph.pcm build/modules/fft.compiler.prime_factor.pcm build/modules/memory.pcm build/modules/utility.pcm build/modules/vector.pcm build/modules/charconv.pcm build/modules/iostream.pcm build/modules/optional.pcm build/modules/string_view.pcm
+build build/modules/fft.compiler.dot.pcm: cxx_module_precompile compiler/algebraic_dft_kernel_graph_dot_writer.cppm | build/modules/fft.compiler.graph.pcm build/modules/filesystem.pcm build/modules/fstream.pcm build/modules/memory.pcm build/modules/sstream.pcm build/modules/string.pcm build/modules/string_view.pcm build/modules/vector.pcm
+  flags = $compiler_dot_module_flags
+
+build build/obj/compiler/instruction_graph_dot_writer.o: cxx_module_object compiler/algebraic_dft_kernel_graph_dot_writer.cppm | build/modules/fft.compiler.dot.pcm build/modules/fft.compiler.graph.pcm build/modules/filesystem.pcm build/modules/fstream.pcm build/modules/memory.pcm build/modules/sstream.pcm build/modules/string.pcm build/modules/string_view.pcm build/modules/vector.pcm
+  flags = $compiler_dot_module_flags
+
+build build/obj/compiler/fft_compiler_cli.o: cxx compiler/fft_compiler_cli.cpp | build/modules/fft.compiler.dot.pcm build/modules/fft.compiler.graph.pcm build/modules/fft.compiler.prime_factor.pcm build/modules/filesystem.pcm build/modules/fstream.pcm build/modules/memory.pcm build/modules/sstream.pcm build/modules/string.pcm build/modules/utility.pcm build/modules/vector.pcm build/modules/charconv.pcm build/modules/iostream.pcm build/modules/optional.pcm build/modules/string_view.pcm
   flags = $compiler_cli_module_flags
 
 build bin/fft_tests: link build/obj/test/fft_tests.o
@@ -162,7 +186,7 @@ build bin/roots_printer: link build/obj/tools/roots_printer.o
   flags = $tool_compile_flags
   libs =
 
-build bin/fft_compiler: link build/obj/compiler/fft_compiler_cli.o build/obj/compiler/algebraic_fft_ast_builder.o build/obj/compiler/prime_factor.o
+build bin/fft_compiler: link build/obj/compiler/fft_compiler_cli.o build/obj/compiler/algebraic_fft_ast_builder.o build/obj/compiler/instruction_graph_dot_writer.o build/obj/compiler/prime_factor.o
   flags = $compiler_module_flags
   libs =
 

@@ -4,6 +4,7 @@ import <optional>;
 import <string_view>;
 import <vector>;
 
+import fft.compiler.dot;
 import fft.compiler.graph;
 
 namespace {
@@ -11,6 +12,7 @@ namespace {
 struct CompilerOptions {
   unsigned int dft_size = 0;
   unsigned int dfts_per_kernel = 1;
+  const char *dot_output_path = "build/fft_compiler_graph.dot";
 };
 
 std::optional<unsigned int> parse_unsigned(std::string_view arg) {
@@ -26,9 +28,12 @@ std::optional<unsigned int> parse_unsigned(std::string_view arg) {
 
 void print_usage(const char *program_name) {
   std::cerr << "Usage: " << program_name << " --dft-size <positive integer> "
-            << "[--dfts-per-kernel <positive integer>]\n"
+            << "[--dfts-per-kernel <positive integer>] "
+            << "[--dot-out <path>]\n"
             << "  --dft-size is required.\n"
-            << "  --dfts-per-kernel is optional and defaults to 1.\n";
+            << "  --dfts-per-kernel is optional and defaults to 1.\n"
+            << "  --dot-out is optional and defaults to "
+               "build/fft_compiler_graph.dot.\n";
 }
 
 std::optional<CompilerOptions> parse_args(int argc, char **argv) {
@@ -65,6 +70,14 @@ std::optional<CompilerOptions> parse_args(int argc, char **argv) {
       continue;
     }
 
+    if (arg == "--dot-out") {
+      if (i + 1 >= argc) {
+        return std::nullopt;
+      }
+      options.dot_output_path = argv[++i];
+      continue;
+    }
+
     return std::nullopt;
   }
 
@@ -84,12 +97,20 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  const fft_compiler::FFTKernelGraphBuilder graph_builder;
-  const fft_compiler::InstructionGraph graph =
+  const fft_compiler::AlgebraicDFTKernelGraphBuilder graph_builder;
+  const fft_compiler::AlgebraicDFTKernelGraph graph =
       graph_builder.Build(options->dft_size, options->dfts_per_kernel);
+
+  const fft_compiler::AlgebraicDFTKernelGraphDotWriter dot_writer;
+  if (!dot_writer.WriteDotFile(graph, options->dot_output_path)) {
+    std::cerr << "failed to write dot file: " << options->dot_output_path
+              << '\n';
+    return 1;
+  }
 
   std::cout << "dft_size=" << graph.dft_size << '\n'
             << "dfts_per_kernel=" << graph.dfts_per_kernel << '\n'
+            << "dot_file=" << options->dot_output_path << '\n'
             << "prime_factor_exponents=";
 
   for (std::size_t i = 0; i < graph.prime_factor_exponents.size(); ++i) {

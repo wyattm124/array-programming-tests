@@ -79,15 +79,51 @@ struct BinaryASTNode : AlgebraicASTNode {
   std::shared_ptr<AlgebraicASTNode> rhs;
 };
 
+struct UnaryASTNode : AlgebraicASTNode {
+  UnaryASTNode(std::shared_ptr<AlgebraicASTNode> input)
+      : in(std::move(input)){}
+
+  [[nodiscard]] std::vector<std::shared_ptr<AlgebraicASTNode>>
+  DotChildren() const override {
+    return {in};
+  }
+
+  std::shared_ptr<AlgebraicASTNode> in;
+};
+
 struct Mult : BinaryASTNode {
   using BinaryASTNode::BinaryASTNode;
   [[nodiscard]] std::string DotLabel() const override { return "*"; }
   [[nodiscard]] std::string DotShape() const override { return "circle"; }
 };
 
+struct MultConj : BinaryASTNode {
+  using BinaryASTNode::BinaryASTNode;
+  [[nodiscard]] std::string DotLabel() const override { return "*~"; }
+  [[nodiscard]] std::string DotShape() const override { return "circle"; }
+};
+
 struct Add : BinaryASTNode {
   using BinaryASTNode::BinaryASTNode;
   [[nodiscard]] std::string DotLabel() const override { return "+"; }
+  [[nodiscard]] std::string DotShape() const override { return "circle"; }
+};
+
+struct Sub : BinaryASTNode {
+  using BinaryASTNode::BinaryASTNode;
+  [[nodiscard]] std::string DotLabel() const override { return "-"; }
+  [[nodiscard]] std::string DotShape() const override { return "circle"; }
+};
+
+struct FoldAdd : UnaryASTNode {
+  using UnaryASTNode::UnaryASTNode;
+  [[nodiscard]] std::string DotLabel() const override { return "+"; }
+  [[nodiscard]] std::string DotShape() const override { return "circle"; }
+};
+
+struct FoldSub : UnaryASTNode {
+  using UnaryASTNode::UnaryASTNode;
+  [[nodiscard]] std::string DotLabel() const override { return "-"; }
   [[nodiscard]] std::string DotShape() const override { return "circle"; }
 };
 
@@ -111,121 +147,28 @@ struct PluckLast : BinaryASTNode {
   [[nodiscard]] std::string DotLabel() const override { return "last"; }
 };
 
-struct AlgebraicDFTKernelGraph {
-  unsigned int dft_size = 0;
-  unsigned int dfts_per_kernel = 1;
-  std::vector<std::pair<unsigned int, unsigned int>> prime_factor_exponents;
-  std::vector<std::shared_ptr<AlgebraicASTNode>> nodes;
+struct JumpListEntry {
+  bool visited = false;
+  std::vector<unsigned int> next_jump_factors = {};
 };
 
-class AlgebraicDFTKernelGraphBuilder {
-public:
-  [[nodiscard]] AlgebraicDFTKernelGraph Build(
-      unsigned int dft_size, unsigned int dfts_per_kernel) const {
-    AlgebraicDFTKernelGraph graph;
-    graph.dft_size = dft_size;
-    graph.dfts_per_kernel = dfts_per_kernel;
-    graph.prime_factor_exponents =
-        prime_factor::get_prime_factor_powers(dft_size);
-    graph.nodes = genGraph(dft_size, dfts_per_kernel);
-    return graph;
+std::vector<JumpListEntry> createJumpList(unsigned int len) {
+  std::vector<JumpListEntry> jump_list(len);
+  for (unsigned int i = len - 1; i >= 0; i--) {
+    
+    // Find the preceding stride that diffs by the smallest factor.
+    // This is equivalent to finding a preceding stride with the greatest
+    // GCD.
+    unsigned int prime_factor = prime_factor::get_prime_factor(i + 1);
+    if (((i + 1) % prime_factor) == 0) {
+      jump_list[((i + 1)/prime_factor) - 1]
+        .next_jump_factors.push_back(prime_factor);
+    }
   }
+  return jump_list;
+}
 
-private:
-  [[nodiscard]] std::vector<std::shared_ptr<AlgebraicASTNode>>
-  genGraph(unsigned int dft_size, unsigned int dfts_per_kernel) const {
-    std::vector<std::shared_ptr<AlgebraicASTNode>> roots;
-    if (dft_size == 0) {
-      return roots;
-    }
-
-    const auto input_nodes = genInputNodes(dft_size);
-    const auto shuffled_inputs = shuffleInputNodes(input_nodes, dft_size);
-    const auto tree_sum = treeReduceSum(shuffled_inputs, 1, 0);
-
-    for (unsigned int kernel_index = 0; kernel_index < dfts_per_kernel;
-         ++kernel_index) {
-      if (tree_sum) {
-        roots.push_back(tree_sum);
-      }
-
-      if (kernel_index + 1 < dfts_per_kernel && dft_size > 1) {
-        auto kernel_root = std::make_shared<RootOfUnity>(kernel_index + 1, dft_size);
-        auto kernel_tag = std::make_shared<ValueASTNode>(kernel_root, std::make_shared<Zero>());
-        roots.push_back(kernel_tag);
-      }
-    }
-
-    return roots;
-  }
-
-  [[nodiscard]] std::vector<std::shared_ptr<AlgebraicASTNode>>
-  genInputNodes(unsigned int dft_size) const {
-    std::vector<std::shared_ptr<AlgebraicASTNode>> nodes;
-    for (unsigned int i = 0; i + 1 < dft_size; i += 2) {
-      nodes.emplace_back(std::make_shared<ValueASTNode>(
-          std::make_shared<Input>(i), std::make_shared<Input>(i + 1)));
-    }
-
-    if (dft_size % 2 != 0) {
-      nodes.emplace_back(std::make_shared<ValueASTNode>(
-          std::make_shared<Input>(dft_size - 1), std::make_shared<Zero>()));
-    }
-
-    return nodes;
-  }
-
-  [[nodiscard]] static std::vector<std::shared_ptr<AlgebraicASTNode>>
-  shuffleInputNodes(const std::vector<std::shared_ptr<AlgebraicASTNode>> &input_layer,
-                    unsigned int dft_size) {
-    std::vector<std::shared_ptr<AlgebraicASTNode>> result;
-    const unsigned int len = static_cast<unsigned int>(input_layer.size());
-    if (len == 0) {
-      return result;
-    }
-
-    unsigned int left = 0;
-    unsigned int right = len - 1;
-
-    if (dft_size % 2) {
-      while (left < right) {
-        result.emplace_back(
-            std::make_shared<PluckOuter>(input_layer[left], input_layer[right]));
-        result.emplace_back(
-            std::make_shared<PluckInner>(input_layer[left], input_layer[right]));
-        ++left;
-        --right;
-      }
-      if (left == right) {
-        result.push_back(input_layer[left]);
-      }
-      return result;
-    }
-
-    if (len % 2) {
-      result.emplace_back(std::make_shared<PluckOuter>(input_layer[0],
-                                                       input_layer[len / 2]));
-    } else {
-      result.emplace_back(std::make_shared<PluckFirst>(input_layer[0],
-                                                       input_layer[len / 2]));
-    }
-
-    bool take_right = true;
-    while (left < right) {
-      if (take_right) {
-        result.emplace_back(std::make_shared<PluckLast>(input_layer[left++],
-                                                        input_layer[right]));
-      } else {
-        result.emplace_back(std::make_shared<PluckFirst>(input_layer[left],
-                                                         input_layer[right--]));
-      }
-      take_right = !take_right;
-    }
-
-    return result;
-  }
-
-  [[nodiscard]] static std::shared_ptr<AlgebraicASTNode>
+[[nodiscard]] std::shared_ptr<AlgebraicASTNode>
   treeReduceSum(const std::vector<std::shared_ptr<AlgebraicASTNode>> &input,
                 unsigned int stride, unsigned int offset) {
     if (!stride) {
@@ -257,6 +200,208 @@ private:
 
     return current_layer.front();
   }
+
+void createSumsListHelper(
+  const std::vector<std::shared_ptr<AlgebraicASTNode>> &source_list,
+  std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> &sums_list,
+  std::vector<JumpListEntry> &jump_list,
+  unsigned int curr_index,
+  unsigned int dft_size) {
+
+  // Populate the sums list for this index
+  std::vector<std::shared_ptr<AlgebraicASTNode>> sink_list;
+  unsigned int bin_size = dft_size/curr_index;
+  for (unsigned int j = 0; j < bin_size; j++) {
+    sink_list.push_back(treeReduceSum(source_list, bin_size, j));
+  }
+  sums_list[curr_index] = sink_list;
+  
+  // Start DFS of all sums lists that use the current one
+  //  based off of a jump factor
+  auto &jump_list_entry = jump_list[curr_index - 1];
+  for (const auto &jump_factor : jump_list_entry.next_jump_factors) { 
+    
+    createSumsListHelper(sink_list, sums_list, jump_list,
+      curr_index * jump_factor, dft_size);
+  }
+
+  // Mark this jump as visited
+  jump_list_entry.visited = true;
+}
+
+[[nodiscard]] std::vector<std::shared_ptr<AlgebraicASTNode>>
+  genInputNodes(unsigned int dft_size) {
+  std::vector<std::shared_ptr<AlgebraicASTNode>> nodes;
+  for (unsigned int i = 0; i + 1 < dft_size; i += 2) {
+    nodes.emplace_back(std::make_shared<ValueASTNode>(
+        std::make_shared<Input>(i), std::make_shared<Input>(i + 1)));
+  }
+
+  if (dft_size % 2 != 0) {
+    nodes.emplace_back(std::make_shared<ValueASTNode>(
+        std::make_shared<Input>(dft_size - 1), std::make_shared<Zero>()));
+  }
+
+  return nodes;
+}
+
+[[nodiscard]] std::vector<std::shared_ptr<AlgebraicASTNode>>
+  shuffleInputNodes(const std::vector<std::shared_ptr<AlgebraicASTNode>> &input_layer,
+                    unsigned int dft_size) {
+  std::vector<std::shared_ptr<AlgebraicASTNode>> result;
+  const unsigned int len = static_cast<unsigned int>(input_layer.size());
+  if (len == 0) {
+    return result;
+  }
+
+  unsigned int left = 0;
+  unsigned int right = len - 1;
+
+  if (dft_size % 2) {
+    while (left < right) {
+      result.emplace_back(
+          std::make_shared<PluckOuter>(input_layer[left], input_layer[right]));
+      result.emplace_back(
+          std::make_shared<PluckInner>(input_layer[left], input_layer[right]));
+      ++left;
+      --right;
+    }
+    if (left == right) {
+      result.push_back(input_layer[left]);
+    }
+    return result;
+  }
+
+  if (len % 2) {
+    result.emplace_back(std::make_shared<PluckOuter>(input_layer[0],
+                                                     input_layer[len / 2]));
+  } else {
+    result.emplace_back(std::make_shared<PluckFirst>(input_layer[0],
+                                                     input_layer[len / 2]));
+  }
+
+  bool take_right = true;
+  while (left < right) {
+    if (take_right) {
+      result.emplace_back(std::make_shared<PluckLast>(input_layer[left++],
+                                                      input_layer[right]));
+    } else {
+      result.emplace_back(std::make_shared<PluckFirst>(input_layer[left],
+                                                       input_layer[right--]));
+    }
+    take_right = !take_right;
+  }
+
+  return result;
+}
+
+std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> createSumsList(const std::vector<std::shared_ptr<AlgebraicASTNode>> &shuffled_input, unsigned int dft_size) {
+  // Create the jump list with outputs of shared sums
+  auto jump_list = createJumpList(shuffled_input.size());
+
+  // The first output is always the sum of the inputs
+  std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> sums_lists(dft_size);
+  sums_lists[0] = {{shuffled_input}};
+
+  // Go through the jump list to create the shared sums
+  for (unsigned int i = 1; i < (jump_list.size() + 1); i++) {
+    
+    // Skip this entry if it has already been visited.
+    //  This should only be the case for indexes relatively prime
+    //  to the DFT size.
+    if (jump_list[i - 1].visited)
+      continue; 
+
+    // DFS through next jumps starting at this index
+    createSumsListHelper(shuffled_input, sums_lists, jump_list, i, dft_size);
+  }
+
+  return sums_lists;
+}
+
+std::vector<std::shared_ptr<AlgebraicASTNode>> sumsListDotProd(
+  const std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> &sums_list,
+  unsigned int dft_size) {
+  std::vector<std::shared_ptr<AlgebraicASTNode>> result(dft_size);
+  result[0] = treeReduceSum(sums_list[0], 1, 0);
+  if ((dft_size - 1) % 2) {
+    result[dft_size/2] = result[0];
+  }
+  
+  for (unsigned int i = 1; i < (dft_size - i); i++) {
+    std::vector<std::shared_ptr<AlgebraicASTNode>> prod_map{sums_list[i][0]};
+    std::vector<std::shared_ptr<AlgebraicASTNode>> prod_map_conj{sums_list[i][0]};
+
+    for (unsigned int j = 1; j < sums_list[i].size(); j++) {
+      unsigned int root_index = (i * j) % dft_size;
+      unsigned int conj_root_index = dft_size - root_index;
+      auto root = std::make_shared<RootOfUnity>(root_index, dft_size);
+      auto root_conj = std::make_shared<RootOfUnity>(conj_root_index, dft_size);
+      auto root_node = std::make_shared<ValueASTNode>(root, root_conj);
+      prod_map.push_back(std::make_shared<Mult>(sums_list[i][j], root_node));
+      prod_map_conj.push_back(std::make_shared<MultConj>(sums_list[i][j], root_node));
+    }
+    
+    result[i] = treeReduceSum(prod_map, 1, 0);
+    result[dft_size - i] = treeReduceSum(prod_map_conj, 1, 0);
+  }
+ 
+  return result;
+}
+
+std::vector<std::shared_ptr<AlgebraicASTNode>> foldToFinalResult(
+  const std::vector<std::shared_ptr<AlgebraicASTNode>> &result_pairs_list, 
+  unsigned int dft_size) {
+  std::vector<std::shared_ptr<AlgebraicASTNode>> result(
+    result_pairs_list.size());
+  result[0] = std::make_shared<FoldAdd>(result_pairs_list[0]);
+  for (unsigned int i = 1; i < (dft_size - i); i++) {
+    result[i] = std::make_shared<FoldAdd>(result_pairs_list[i]);
+    result[dft_size - i] = std::make_shared<FoldAdd>(result_pairs_list[dft_size - i]);
+  }
+
+  if ((dft_size - 1) % 2) {
+    result[dft_size/2] = std::make_shared<FoldSub>(result_pairs_list[dft_size/2]);
+  }
+  return result;
+}
+
+struct AlgebraicDFTKernelGraph {
+  unsigned int dft_size = 0;
+  unsigned int dfts_per_kernel = 1;
+  std::vector<std::pair<unsigned int, unsigned int>> prime_factor_exponents;
+  std::vector<std::shared_ptr<AlgebraicASTNode>> nodes;
+};
+
+class AlgebraicDFTKernelGraphBuilder {
+public:
+  [[nodiscard]] AlgebraicDFTKernelGraph Build(
+      unsigned int dft_size, unsigned int dfts_per_kernel) const {
+    AlgebraicDFTKernelGraph graph;
+    graph.dft_size = dft_size;
+    graph.dfts_per_kernel = dfts_per_kernel;
+    graph.prime_factor_exponents =
+        prime_factor::get_prime_factor_powers(dft_size);
+    graph.nodes = genGraph(dft_size);
+    return graph;
+  }
+
+private:
+  [[nodiscard]] std::vector<std::shared_ptr<AlgebraicASTNode>>
+  genGraph(unsigned int dft_size) const {
+    std::vector<std::shared_ptr<AlgebraicASTNode>> roots;
+    if (dft_size == 0) {
+      return roots;
+    }
+
+    const auto input_nodes = genInputNodes(dft_size);
+    const auto shuffled_inputs = shuffleInputNodes(input_nodes, dft_size);
+    const auto sums_list = createSumsList(shuffled_inputs, dft_size);
+    const auto paired_results = sumsListDotProd(sums_list, dft_size);
+    const auto final_results = foldToFinalResult(paired_results, dft_size); 
+
+    return final_results;
+  } 
 };
 
 using FFTKernelGraphBuilder = AlgebraicDFTKernelGraphBuilder;

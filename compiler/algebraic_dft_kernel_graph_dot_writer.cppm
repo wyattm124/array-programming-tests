@@ -55,7 +55,8 @@ bool was_visited(const std::vector<const fft_compiler::AlgebraicASTNode *> &visi
 void append_ast_subgraph(
     std::ostringstream &dot,
     const std::shared_ptr<fft_compiler::AlgebraicASTNode> &node,
-    std::vector<const fft_compiler::AlgebraicASTNode *> &visited) {
+    std::vector<const fft_compiler::AlgebraicASTNode *> &visited,
+    std::vector<std::string> &leaf_node_ids) {
   if (!node || was_visited(visited, node.get())) {
     return;
   }
@@ -66,14 +67,47 @@ void append_ast_subgraph(
       << ", label=\"" << escape_dot_label(node->DotLabel())
       << "\"];\n";
 
-  for (const auto &child : node->DotChildren()) {
+  const auto children = node->DotChildren();
+  bool has_child = false;
+  for (const auto &child : children) {
     if (!child) {
       continue;
     }
+    has_child = true;
     const std::string child_id = ast_node_id(child);
     dot << "  \"" << node_id << "\" -> \"" << child_id << "\";\n";
-    append_ast_subgraph(dot, child, visited);
+    append_ast_subgraph(dot, child, visited, leaf_node_ids);
   }
+
+  if (!has_child) {
+    leaf_node_ids.push_back(node_id);
+  }
+}
+
+void append_leaf_rank_constraints(std::ostringstream &dot,
+                                  const std::vector<std::string> &leaf_node_ids) {
+  if (leaf_node_ids.empty()) {
+    return;
+  }
+
+  dot << "  // Keep AST leaves aligned.\n"
+      << "  {\n"
+      << "    rank=sink;\n";
+
+  if (leaf_node_ids.size() == 1) {
+    dot << "    \"" << leaf_node_ids.front() << "\";\n";
+  } else {
+    dot << "    edge [style=invis, weight=10];\n    ";
+    for (std::size_t i = 0; i < leaf_node_ids.size(); ++i) {
+      if (i != 0) {
+        dot << " -> ";
+      }
+      dot << "\"" << leaf_node_ids[i] << "\"";
+    }
+    dot << ";\n";
+  }
+
+  dot << "  }\n";
 }
 
 } // namespace
@@ -85,7 +119,7 @@ public:
   [[nodiscard]] std::string ToDot(const AlgebraicDFTKernelGraph &graph) const {
     std::ostringstream dot;
     dot << "digraph algebraic_dft_kernel_graph {\n"
-        << "  rankdir=LR;\n"
+        << "  rankdir=RL;\n"
         << "  graph [labelloc=t, label=\"dft_size=" << graph.dft_size
         << ", dfts_per_kernel=" << graph.dfts_per_kernel << "\"];\n"
         << "  \"graph_root\" [shape=box, label=\"AlgebraicDFTKernelGraph\"];\n";
@@ -98,6 +132,7 @@ public:
     }
 
     std::vector<const AlgebraicASTNode *> visited;
+    std::vector<std::string> leaf_node_ids;
     for (std::size_t i = 0; i < graph.nodes.size(); ++i) {
       const auto &node = graph.nodes[i];
       const std::string graph_node_id = "graph_node_" + std::to_string(i);
@@ -114,8 +149,10 @@ public:
 
       const std::string ast_id = ast_node_id(node);
       dot << "  \"" << graph_node_id << "\" -> \"" << ast_id << "\";\n";
-      append_ast_subgraph(dot, node, visited);
+      append_ast_subgraph(dot, node, visited, leaf_node_ids);
     }
+
+    append_leaf_rank_constraints(dot, leaf_node_ids);
 
     dot << "}\n";
     return dot.str();

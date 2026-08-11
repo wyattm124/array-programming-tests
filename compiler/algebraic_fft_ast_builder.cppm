@@ -127,6 +127,12 @@ struct FoldSub : UnaryASTNode {
   [[nodiscard]] std::string DotShape() const override { return "circle"; }
 };
 
+struct Negate : UnaryASTNode {
+  using UnaryASTNode::UnaryASTNode;
+  [[nodiscard]] std::string DotLabel() const override { return "Neg"; }
+  [[nodiscard]] std::string DotShape() const override { return "circle"; }
+};
+
 struct PluckOuter : BinaryASTNode {
   using BinaryASTNode::BinaryASTNode;
   [[nodiscard]] std::string DotLabel() const override { return "outer"; }
@@ -151,22 +157,6 @@ struct JumpListEntry {
   bool visited = false;
   std::vector<unsigned int> next_jump_factors = {};
 };
-
-std::vector<JumpListEntry> createJumpList(unsigned int len) {
-  std::vector<JumpListEntry> jump_list(len);
-  for (unsigned int i = len - 1; i >= 0; i--) {
-    
-    // Find the preceding stride that diffs by the smallest factor.
-    // This is equivalent to finding a preceding stride with the greatest
-    // GCD.
-    unsigned int prime_factor = prime_factor::get_prime_factor(i + 1);
-    if (((i + 1) % prime_factor) == 0) {
-      jump_list[((i + 1)/prime_factor) - 1]
-        .next_jump_factors.push_back(prime_factor);
-    }
-  }
-  return jump_list;
-}
 
 [[nodiscard]] std::shared_ptr<AlgebraicASTNode>
   treeReduceSum(const std::vector<std::shared_ptr<AlgebraicASTNode>> &input,
@@ -200,34 +190,6 @@ std::vector<JumpListEntry> createJumpList(unsigned int len) {
 
     return current_layer.front();
   }
-
-void createSumsListHelper(
-  const std::vector<std::shared_ptr<AlgebraicASTNode>> &source_list,
-  std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> &sums_list,
-  std::vector<JumpListEntry> &jump_list,
-  unsigned int curr_index,
-  unsigned int dft_size) {
-
-  // Populate the sums list for this index
-  std::vector<std::shared_ptr<AlgebraicASTNode>> sink_list;
-  unsigned int bin_size = dft_size/curr_index;
-  for (unsigned int j = 0; j < bin_size; j++) {
-    sink_list.push_back(treeReduceSum(source_list, bin_size, j));
-  }
-  sums_list[curr_index] = sink_list;
-  
-  // Start DFS of all sums lists that use the current one
-  //  based off of a jump factor
-  auto &jump_list_entry = jump_list[curr_index - 1];
-  for (const auto &jump_factor : jump_list_entry.next_jump_factors) { 
-    
-    createSumsListHelper(sink_list, sums_list, jump_list,
-      curr_index * jump_factor, dft_size);
-  }
-
-  // Mark this jump as visited
-  jump_list_entry.visited = true;
-}
 
 [[nodiscard]] std::vector<std::shared_ptr<AlgebraicASTNode>>
   genInputNodes(unsigned int dft_size) {
@@ -295,25 +257,85 @@ void createSumsListHelper(
   return result;
 }
 
-std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> createSumsList(const std::vector<std::shared_ptr<AlgebraicASTNode>> &shuffled_input, unsigned int dft_size) {
-  // Create the jump list with outputs of shared sums
-  auto jump_list = createJumpList(shuffled_input.size());
+std::vector<JumpListEntry> createJumpList(unsigned int len) {
+  std::vector<JumpListEntry> jump_list(len);
+  for (unsigned int i = 0; i < len; i++) {
+    unsigned int num = len - i;
+    
+    // Find the preceding stride that diffs by the smallest factor.
+    // This is equivalent to finding a preceding stride with the greatest
+    // GCD.
+    unsigned int prime_factor = prime_factor::get_prime_factor(num);
+    if (prime_factor > 1 && (num % prime_factor) == 0) {
+      jump_list[(num/prime_factor) - 1]
+        .next_jump_factors.push_back(prime_factor);
+    }
+  }
+  return jump_list;
+}
 
-  // The first output is always the sum of the inputs
-  std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> sums_lists(dft_size);
+void createSumsListHelper(
+  const std::vector<std::shared_ptr<AlgebraicASTNode>> &source_list,
+  std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> &sums_list,
+  std::vector<JumpListEntry> &jump_list,
+  unsigned int curr_val,
+  unsigned int dft_size) {
+
+  // Populate the sums list for this index
+  std::vector<std::shared_ptr<AlgebraicASTNode>> sink_list;
+  if (dft_size % curr_val) {
+    sink_list = source_list;
+  } else {
+    unsigned int bin_size = dft_size/curr_val;
+    for (unsigned int j = 0; j < bin_size && j < source_list.size(); j++) {
+      if (j + bin_size < source_list.size()) {
+        sink_list.push_back(treeReduceSum(source_list, bin_size, j));
+      } else {
+        sink_list.push_back(source_list[j]);
+      }
+    }
+  }
+  sums_list[curr_val] = sink_list;
+  
+  // Start DFS of all sums lists that use the current one
+  //  based off of a jump factor
+  auto &jump_list_entry = jump_list[curr_val - 1];
+  for (const auto &jump_factor : jump_list_entry.next_jump_factors) { 
+    
+    createSumsListHelper(sink_list, sums_list, jump_list,
+      curr_val * jump_factor, dft_size);
+  }
+
+  // Mark this jump as visited
+  jump_list_entry.visited = true;
+}
+
+std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> createSumsList(
+  const std::vector<std::shared_ptr<AlgebraicASTNode>> &shuffled_input,
+  unsigned int dft_size) {
+  
+  // Create the jump list with outputs of shared sums.
+  //  There should be an entry for every input pair not starting with the
+  //  0th scalar input. Note the jump list will be 1 shorter than the sums
+  //  lists.
+  auto jump_list = createJumpList(shuffled_input.size() - 1);
+
+  // The first output is always the sum of the inputs, and there will be an
+  //  and sum list for every pair of inputs.
+  std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> sums_lists(shuffled_input.size());
   sums_lists[0] = {{shuffled_input}};
 
   // Go through the jump list to create the shared sums
-  for (unsigned int i = 1; i < (jump_list.size() + 1); i++) {
+  for (unsigned int i = 0; i < jump_list.size(); i++) {
     
     // Skip this entry if it has already been visited.
     //  This should only be the case for indexes relatively prime
     //  to the DFT size.
-    if (jump_list[i - 1].visited)
+    if (jump_list[i].visited)
       continue; 
 
     // DFS through next jumps starting at this index
-    createSumsListHelper(shuffled_input, sums_lists, jump_list, i, dft_size);
+    createSumsListHelper(shuffled_input, sums_lists, jump_list, i + 1, dft_size);
   }
 
   return sums_lists;
@@ -322,24 +344,43 @@ std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> createSumsList(const
 std::vector<std::shared_ptr<AlgebraicASTNode>> sumsListDotProd(
   const std::vector<std::vector<std::shared_ptr<AlgebraicASTNode>>> &sums_list,
   unsigned int dft_size) {
+
+  // Populate the results that are strictly sums
   std::vector<std::shared_ptr<AlgebraicASTNode>> result(dft_size);
   result[0] = treeReduceSum(sums_list[0], 1, 0);
   if ((dft_size - 1) % 2) {
     result[dft_size/2] = result[0];
   }
-  
+
+  // Keep the roots cached to avoid re-calculating them 
+  std::vector<std::shared_ptr<AlgebraicASTNode>> roots;
+  for (unsigned int i = 1; i < (dft_size + 1)/2; i++) {
+    unsigned int conj_index = dft_size - i;
+    roots.push_back(std::make_shared<ValueASTNode>(
+      std::make_shared<RootOfUnity>(i, dft_size),
+      std::make_shared<RootOfUnity>(conj_index, dft_size)
+    ));
+  }
+ 
   for (unsigned int i = 1; i < (dft_size - i); i++) {
     std::vector<std::shared_ptr<AlgebraicASTNode>> prod_map{sums_list[i][0]};
     std::vector<std::shared_ptr<AlgebraicASTNode>> prod_map_conj{sums_list[i][0]};
 
     for (unsigned int j = 1; j < sums_list[i].size(); j++) {
-      unsigned int root_index = (i * j) % dft_size;
-      unsigned int conj_root_index = dft_size - root_index;
-      auto root = std::make_shared<RootOfUnity>(root_index, dft_size);
-      auto root_conj = std::make_shared<RootOfUnity>(conj_root_index, dft_size);
-      auto root_node = std::make_shared<ValueASTNode>(root, root_conj);
-      prod_map.push_back(std::make_shared<Mult>(sums_list[i][j], root_node));
-      prod_map_conj.push_back(std::make_shared<MultConj>(sums_list[i][j], root_node));
+      unsigned int root_val = (i * j) % dft_size;
+
+      if (root_val <= roots.size()) {
+        prod_map.push_back(std::make_shared<Mult>(sums_list[i][j], roots[root_val - 1]));
+        prod_map_conj.push_back(std::make_shared<MultConj>(sums_list[i][j], roots[root_val - 1]));
+      } else if (root_val == roots.size() + 1) {
+        auto neg_input = std::make_shared<Negate>(sums_list[i][j]);
+        prod_map.push_back(neg_input);
+        prod_map_conj.push_back(neg_input);
+      } else {
+        root_val = (2 * roots.size() + 1) - root_val;
+        prod_map.push_back(std::make_shared<MultConj>(sums_list[i][j], roots[root_val]));
+        prod_map_conj.push_back(std::make_shared<Mult>(sums_list[i][j], roots[root_val]));
+      }
     }
     
     result[i] = treeReduceSum(prod_map, 1, 0);
